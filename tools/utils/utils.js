@@ -18,19 +18,19 @@ var utils = exports;
 // 'url.parse' would give us {protocol:' 3000', host: undefined, port:
 // undefined} or something like that.
 //
-// 'defaults' is an optional object with 'host', 'port', and 'protocol' keys.
+// 'defaults' is an optional object with 'hostname', 'port', and 'protocol' keys.
 exports.parseUrl = function (str, defaults) {
   // XXX factor this out into a {type: host/port}?
 
   defaults = defaults || {};
-  var defaultHost = defaults.host || undefined;
+  var defaultHostname = defaults.hostname || undefined;
   var defaultPort = defaults.port || undefined;
   var defaultProtocol = defaults.protocol || undefined;
 
   if (str.match(/^[0-9]+$/)) { // just a port
     return {
       port: str,
-      host: defaultHost,
+      hostname: defaultHostname,
       protocol: defaultProtocol };
   }
 
@@ -40,26 +40,27 @@ exports.parseUrl = function (str, defaults) {
   }
 
   var parsed = url.parse(str);
-  if (! parsed.protocol.match(/\/\/$/)) {
-    // For easy concatenation, add double slashes to protocols.
-    parsed.protocol = parsed.protocol + "//";
-  }
+
+  // for consistency remove colon at the end of protocol
+  parsed.protocol = parsed.protocol.replace(/\:$/, '');
+
   return {
     protocol: hasScheme ? parsed.protocol : defaultProtocol,
-    host: parsed.hostname || defaultHost,
+    hostname: parsed.hostname || defaultHostname,
     port: parsed.port || defaultPort
   };
 };
 
-// 'url' is an object with 'host', 'port', and 'protocol' keys, such as
+// 'options' is an object with 'hostname', 'port', and 'protocol' keys, such as
 // the return value of parseUrl.
-exports.formatUrl = function (url) {
-  let string = url.protocol + url.host;
-  if (url.port) {
-    string += `:${url.port}`;
-  }
-  return string;
-}
+exports.formatUrl = function (options) {
+  // For consistency with `Meteor.absoluteUrl`, add a trailing slash to make
+  // this a valid URL
+  if (!options.pathname)
+    options.pathname = "/";
+
+  return url.format(options);
+};
 
 exports.ipAddress = function () {
   let defaultRoute;
@@ -107,6 +108,15 @@ ${addressEntries.map(entry => entry.address).join(', ')}`);
 exports.hasScheme = function (str) {
   return !! str.match(/^[A-Za-z][A-Za-z0-9+-\.]*\:\/\//);
 };
+
+
+exports.hasScheme = function (str) {
+  return !! str.match(/^[A-Za-z][A-Za-z0-9+-\.]*\:\/\//);
+};
+
+exports.isIPv4Address = function (str) {
+  return str.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/);
+}
 
 // XXX: Move to e.g. formatters.js?
 // Prints a package list in a nice format.
@@ -472,7 +482,7 @@ exports.isUrlWithFileScheme = function (x) {
 
 exports.isUrlWithSha = function (x) {
   // Is a URL with a fixed SHA? We use this for Cordova -- although theoretically we could use
-  // a URL like isNpmUrl(), there are a variety of problems with this, 
+  // a URL like isNpmUrl(), there are a variety of problems with this,
   // see https://github.com/meteor/meteor/pull/5562
   return /^https?:\/\/.*[0-9a-f]{40}/.test(x);
 }

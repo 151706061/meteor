@@ -15,6 +15,7 @@ var tropohouse = require('./packaging/tropohouse.js');
 var utils = require('./utils/utils.js');
 var watch = require('./fs/watch.js');
 var Profile = require('./tool-env/profile.js').Profile;
+import { KNOWN_ISOBUILD_FEATURE_PACKAGES } from './isobuild/compiler.js';
 
 // The ProjectContext represents all the context associated with an app:
 // metadata files in the `.meteor` directory, the choice of package versions
@@ -59,8 +60,7 @@ var STAGE = {
 _.extend(ProjectContext.prototype, {
   reset: function (moreOptions, resetOptions) {
     var self = this;
-    // Allow overriding some options until the next call to reset; used by
-    // 'meteor update' code to try various values of releaseForConstraints.
+    // Allow overriding some options until the next call to reset;
     var options = _.extend({}, self.originalOptions, moreOptions);
     // This is options that are actually directed at reset itself.
     resetOptions = resetOptions || {};
@@ -83,6 +83,18 @@ _.extend(ProjectContext.prototype, {
       options.projectDir;
     self._explicitlyAddedLocalPackageDirs =
       options.explicitlyAddedLocalPackageDirs;
+
+    // Used to override the directory that Meteor's build process
+    // writes to; used by `meteor test` so that you can test your
+    // app in parallel to writing it, with an isolated database.
+    // You can override the default .meteor/local by specifying
+    // METEOR_LOCAL_DIR. You can use relative path if you want it
+    // relative to your project directory.
+    self.projectLocalDir = process.env.METEOR_LOCAL_DIR ?
+      files.pathResolve(options.projectDir,
+        files.convertToStandardPath(process.env.METEOR_LOCAL_DIR))
+      : (options.projectLocalDir ||
+        files.pathJoin(self.projectDir, '.meteor', 'local'));
 
     // Used by 'meteor rebuild'; true to rebuild all packages, or a list of
     // package names.  Deletes the isopacks and their plugin caches.
@@ -128,21 +140,6 @@ _.extend(ProjectContext.prototype, {
     // a web.cordova slice (because we aren't yet smart enough to just default
     // to using the web.browser slice instead or make a common 'web' slice).
     self._forceIncludeCordovaUnibuild = options.forceIncludeCordovaUnibuild;
-
-    // If explicitly specified as null, use no release for constraints.
-    // If specified non-null, should be a release version catalog record.
-    // If not specified, defaults to release.current.
-    //
-    // Note that NONE of these cases are "use the release from
-    // self.releaseFile"; after all, if you are explicitly running `meteor
-    // --release foo` it will override what is found in .meteor/releases.
-    if (_.has(options, 'releaseForConstraints')) {
-      self._releaseForConstraints = options.releaseForConstraints || null;
-    } else if (release.current.isCheckout()) {
-      self._releaseForConstraints = null;
-    } else {
-      self._releaseForConstraints = release.current.getCatalogReleaseData();
-    }
 
     if (resetOptions.preservePackageMap && self.packageMap) {
       self._cachedVersionsBeforeReset = self.packageMap.toVersionMap();
@@ -213,31 +210,45 @@ _.extend(ProjectContext.prototype, {
     // calls to the constraint solver, the constraint solver can be
     // more efficient by caching or memoizing its work.  We choose not
     // to reset this when reset() is called more than once.
-    self._resolverResultCache = (self._resolverResultCache || {});
+    self._readResolverResultCache();
   },
 
   readProjectMetadata: function () {
+    // don't generate a profiling report for this stage (Profile.run),
+    // because all we do here is read a handful of files.
     this._completeStagesThrough(STAGE.READ_PROJECT_METADATA);
   },
   initializeCatalog: function () {
-    this._completeStagesThrough(STAGE.INITIALIZE_CATALOG);
+    Profile.run('ProjectContext initializeCatalog', () => {
+      this._completeStagesThrough(STAGE.INITIALIZE_CATALOG);
+    });
   },
   resolveConstraints: function () {
-    this._completeStagesThrough(STAGE.RESOLVE_CONSTRAINTS);
+    Profile.run('ProjectContext resolveConstraints', () => {
+      this._completeStagesThrough(STAGE.RESOLVE_CONSTRAINTS);
+    });
   },
   downloadMissingPackages: function () {
-    this._completeStagesThrough(STAGE.DOWNLOAD_MISSING_PACKAGES);
+    Profile.run('ProjectContext downloadMissingPackages', () => {
+      this._completeStagesThrough(STAGE.DOWNLOAD_MISSING_PACKAGES);
+    });
   },
   buildLocalPackages: function () {
-    this._completeStagesThrough(STAGE.BUILD_LOCAL_PACKAGES);
+    Profile.run('ProjectContext buildLocalPackages', () => {
+      this._completeStagesThrough(STAGE.BUILD_LOCAL_PACKAGES);
+    });
   },
   saveChangedMetadata: function () {
-    this._completeStagesThrough(STAGE.SAVE_CHANGED_METADATA);
+    Profile.run('ProjectContext saveChangedMetadata', () => {
+      this._completeStagesThrough(STAGE.SAVE_CHANGED_METADATA);
+    });
   },
   prepareProjectForBuild: function () {
     // This is the same as saveChangedMetadata, but if we insert stages after
     // that one it will continue to mean "fully finished".
-    this.saveChangedMetadata();
+    Profile.run('ProjectContext prepareProjectForBuild', () => {
+      this._completeStagesThrough(STAGE.SAVE_CHANGED_METADATA);
+    });
   },
 
   _completeStagesThrough: function (targetStage) {
@@ -263,19 +274,20 @@ _.extend(ProjectContext.prototype, {
 
   getProjectLocalDirectory: function (subdirectory) {
     var self = this;
-    return files.pathJoin(self.projectDir, '.meteor', 'local', subdirectory);
+    return files.pathJoin(self.projectLocalDir, subdirectory);
   },
 
   getMeteorShellDirectory: function(projectDir) {
     return this.getProjectLocalDirectory("shell");
   },
 
-  // You can call this manually if you want to do some work before resolving
-  // constraints, or you can let prepareProjectForBuild do it for you.
+  // You can call this manually (that is, the public version without
+  // an `_`) if you want to do some work before resolving constraints,
+  // or you can let prepareProjectForBuild do it for you.
   //
   // This should be pretty fast --- for example, we shouldn't worry about
   // needing to wait for it to be done before we open the runner proxy.
-  _readProjectMetadata: function () {
+  _readProjectMetadata: Profile('_readProjectMetadata', function () {
     var self = this;
     buildmessage.assertInCapture();
 
@@ -287,7 +299,8 @@ _.extend(ProjectContext.prototype, {
 
       // Read .meteor/release.
       self.releaseFile = new exports.ReleaseFile({
-        projectDir: self.projectDir
+        projectDir: self.projectDir,
+        catalog: self._officialCatalog,
       });
       if (buildmessage.jobHasMessages())
         return;
@@ -335,6 +348,13 @@ _.extend(ProjectContext.prototype, {
     });
 
     self._completedStage = STAGE.READ_PROJECT_METADATA;
+  }),
+
+  // Write the new release to .meteor/release and create a
+  // .meteor/dev_bundle symlink to the corresponding dev_bundle.
+  writeReleaseFileAndDevBundleLink(releaseName) {
+    assert.strictEqual(files.inCheckout(), false);
+    this.releaseFile.write(releaseName);
   },
 
   _ensureProjectDir: function () {
@@ -427,7 +447,7 @@ _.extend(ProjectContext.prototype, {
     self.appIdentifier = appId;
   },
 
-  _resolveConstraints: function () {
+  _resolveConstraints: Profile('_resolveConstraints', function () {
     var self = this;
     buildmessage.assertInJob();
 
@@ -477,7 +497,8 @@ _.extend(ProjectContext.prototype, {
           // of it yet.  It's not actually fatal, though, for previousSolution
           // to refer to package versions that we don't have access to or don't
           // exist.  They'll end up getting changed or removed if possible.
-          missingPreviousVersionIsError: canRetry
+          missingPreviousVersionIsError: canRetry,
+          supportedIsobuildFeaturePackages: KNOWN_ISOBUILD_FEATURE_PACKAGES,
         };
         if (self._upgradePackageNames) {
           resolveOptions.upgrade = self._upgradePackageNames;
@@ -490,7 +511,7 @@ _.extend(ProjectContext.prototype, {
 
         var solution;
         try {
-          Profile.run(
+          Profile.time(
             "Select Package Versions" +
               (resolverRunCount > 1 ? (" (Try " + resolverRunCount + ")") : ""),
             function () {
@@ -527,9 +548,48 @@ _.extend(ProjectContext.prototype, {
           anticipatedPrereleases: anticipatedPrereleases
         });
 
+        self._saveResolverResultCache();
+
         self._completedStage = STAGE.RESOLVE_CONSTRAINTS;
       });
     });
+  }),
+
+  _readResolverResultCache() {
+    if (! this._resolverResultCache) {
+      try {
+        this._resolverResultCache =
+          JSON.parse(files.readFile(files.pathJoin(
+            this.projectLocalDir,
+            "resolver-result-cache.json"
+          )));
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+        this._resolverResultCache = {};
+      }
+    }
+
+    return this._resolverResultCache;
+  },
+
+  _saveResolverResultCache() {
+    files.writeFileAtomically(
+      files.pathJoin(
+        this.projectLocalDir,
+        "resolver-result-cache.json"
+      ),
+      JSON.stringify(this._resolverResultCache) + "\n"
+    );
+  },
+
+  // When running test-packages for an app with local packages, this
+  // method will return the original app dir, as opposed to the temporary
+  // testRunnerAppDir created for the tests.
+  getOriginalAppDirForTestPackages() {
+    const appDir = this._projectDirForLocalPackages;
+    if (_.isString(appDir) && appDir !== this.projectDir) {
+      return appDir;
+    }
   },
 
   _localPackageSearchDirs: function () {
@@ -557,7 +617,7 @@ _.extend(ProjectContext.prototype, {
   // but does not compile the packages.
   //
   // Must be run in a buildmessage context. On build error, returns null.
-  _initializeCatalog: function () {
+  _initializeCatalog: Profile('_initializeCatalog', function () {
     var self = this;
     buildmessage.assertInJob();
 
@@ -594,7 +654,7 @@ _.extend(ProjectContext.prototype, {
         }
       );
     });
-  },
+  }),
 
   _getRootDepsAndConstraints: function () {
     var self = this;
@@ -603,7 +663,6 @@ _.extend(ProjectContext.prototype, {
 
     self._addAppConstraints(depsAndConstraints);
     self._addLocalPackageConstraints(depsAndConstraints);
-    self._addReleaseConstraints(depsAndConstraints);
     return depsAndConstraints;
   },
 
@@ -624,19 +683,6 @@ _.extend(ProjectContext.prototype, {
       var versionRecord = self.localCatalog.getLatestVersion(packageName);
       var constraint = utils.parsePackageConstraint(
         packageName + "@=" + versionRecord.version);
-      // Add a constraint ("this is the only version available") but no
-      // dependency (we don't automatically use all local packages!)
-      depsAndConstraints.constraints.push(constraint);
-    });
-  },
-
-  _addReleaseConstraints: function (depsAndConstraints) {
-    var self = this;
-    if (! self._releaseForConstraints)
-      return;
-    _.each(self._releaseForConstraints.packages, function (version, packageName) {
-      var constraint = utils.parsePackageConstraint(
-        packageName + "@=" + version);
       // Add a constraint ("this is the only version available") but no
       // dependency (we don't automatically use all local packages!)
       depsAndConstraints.constraints.push(constraint);
@@ -691,7 +737,7 @@ _.extend(ProjectContext.prototype, {
     return resolver;
   },
 
-  _downloadMissingPackages: function () {
+  _downloadMissingPackages: Profile('_downloadMissingPackages', function () {
     var self = this;
     buildmessage.assertInJob();
     if (!self.packageMap)
@@ -707,9 +753,9 @@ _.extend(ProjectContext.prototype, {
         self._completedStage = STAGE.DOWNLOAD_MISSING_PACKAGES;
       });
     });
-  },
+  }),
 
-  _buildLocalPackages: function () {
+  _buildLocalPackages: Profile('_buildLocalPackages', function () {
     var self = this;
     buildmessage.assertInCapture();
 
@@ -735,9 +781,9 @@ _.extend(ProjectContext.prototype, {
       self.isopackCache.buildLocalPackages();
     });
     self._completedStage = STAGE.BUILD_LOCAL_PACKAGES;
-  },
+  }),
 
-  _saveChangedMetadata: function () {
+  _saveChangedMetadata: Profile('_saveChangedMetadata', function () {
     var self = this;
 
     // Save any changes to .meteor/packages.
@@ -756,7 +802,7 @@ _.extend(ProjectContext.prototype, {
     }
 
     self._completedStage = STAGE.SAVE_CHANGED_METADATA;
-  }
+  })
 });
 
 
@@ -934,6 +980,18 @@ _.extend(exports.ProjectConstraintsFile.prototype, {
       utils.validatePackageName(packageName);
       return utils.parsePackageConstraint(packageName);
     }));
+  },
+
+  // For every package we already have, update the constraint to be semver>=
+  // the constraint from the release
+  updateReleaseConstraints: function (releaseRecord) {
+    this.addConstraints(
+      _.compact(_.map(releaseRecord.packages, (version, packageName) => {
+        if (this.getConstraint(packageName)) {
+          return utils.parsePackageConstraint(packageName + '@' + version);
+        }
+      }))
+    );
   },
 
   // The packages in packagesToRemove are expected to actually be in the file;
@@ -1225,6 +1283,8 @@ exports.ReleaseFile = function (options) {
   var self = this;
 
   self.filename = files.pathJoin(options.projectDir, '.meteor', 'release');
+  self.catalog = options.catalog || catalog.official;
+
   self.watchSet = null;
   // The release name actually written in the file.  Null if no fill.  Empty if
   // the file is empty.
@@ -1286,6 +1346,82 @@ _.extend(exports.ReleaseFile.prototype, {
     self.displayReleaseName = catalogUtils.displayRelease(parts[0], parts[1]);
     self.releaseTrack = parts[0];
     self.releaseVersion = parts[1];
+
+    self.ensureDevBundleLink();
+  },
+
+  // Returns an absolute path to the dev_bundle appropriate for the
+  // release specified in the .meteor/release file.
+  getDevBundle() {
+    let devBundle = files.getDevBundle();
+    const devBundleParts = devBundle.split(files.pathSep);
+    const meteorToolIndex = devBundleParts.lastIndexOf("meteor-tool");
+
+    if (meteorToolIndex >= 0) {
+      const releaseVersion = this.catalog.getReleaseVersion(
+        this.releaseTrack,
+        this.releaseVersion
+      );
+
+      if (releaseVersion) {
+        const meteorToolVersion = releaseVersion.tool.split("@").pop();
+        devBundleParts[meteorToolIndex + 1] = meteorToolVersion;
+        devBundle = devBundleParts.join(files.pathSep);
+      }
+    }
+
+    try {
+      return files.realpath(devBundle);
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+      return null;
+    }
+  },
+
+  // Make a symlink from .meteor/local/dev_bundle to the actual dev_bundle.
+  ensureDevBundleLink() {
+    import { makeLink, readLink } from "./cli/dev-bundle-links.js";
+
+    const dotMeteorDir = files.pathDirname(this.filename);
+    const localDir = files.pathJoin(dotMeteorDir, "local");
+    const devBundleLink = files.pathJoin(localDir, "dev_bundle");
+
+    if (this.isCheckout()) {
+      // Only create .meteor/local/dev_bundle if .meteor/release refers to
+      // an actual release, and remove it otherwise.
+      files.rm_recursive(devBundleLink);
+      return;
+    }
+
+    if (files.inCheckout()) {
+      // Never update .meteor/local/dev_bundle to point to a checkout.
+      return;
+    }
+
+    const newTarget = this.getDevBundle();
+    if (! newTarget) {
+      return;
+    }
+
+    try {
+      const oldOSPath = readLink(devBundleLink);
+      const oldTarget = files.convertToStandardPath(oldOSPath);
+      if (newTarget === oldTarget) {
+        // Don't touch .meteor/local/dev_bundle if it already points to
+        // the right target path.
+        return;
+      }
+
+      files.mkdir_p(localDir);
+      makeLink(newTarget, devBundleLink);
+
+    } catch (e) {
+      if (e.code !== "ENOENT") {
+        // It's ok if the above commands failed because the target path
+        // did not exist, but other errors should not be silenced.
+        throw e;
+      }
+    }
   },
 
   write: function (releaseName) {

@@ -170,6 +170,19 @@ _.extend(Proxy.prototype, {
   _tryHandleConnections: function () {
     var self = this;
 
+    function attempt(resOrSocket, fn) {
+      try {
+        return fn();
+      } catch (e) {
+        if (typeof resOrSocket.writeHead === "function") {
+          resOrSocket.writeHead(400, {
+            'Content-Type': 'text/plain'
+          });
+        }
+        resOrSocket.end("Bad request\n");
+      }
+    }
+
     while (self.httpQueue.length) {
       if (self.mode !== "errorpage" && self.mode !== "proxy") {
         break;
@@ -179,9 +192,9 @@ _.extend(Proxy.prototype, {
       if (self.mode === "errorpage") {
         showErrorPage(c.res);
       } else {
-        self.proxy.web(c.req, c.res, {
+        attempt(c.res, () => self.proxy.web(c.req, c.res, {
           target: 'http://' + self.proxyToHost + ':' + self.proxyToPort
-        });
+        }));
       }
     }
 
@@ -191,9 +204,9 @@ _.extend(Proxy.prototype, {
       }
 
       var c = self.websocketQueue.shift();
-      self.proxy.ws(c.req, c.socket, c.head, {
+      attempt(c.socket, () => self.proxy.ws(c.req, c.socket, c.head, {
         target: 'http://' + self.proxyToHost + ':' + self.proxyToPort
-      });
+      }));
     }
   },
 

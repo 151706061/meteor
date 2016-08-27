@@ -66,6 +66,7 @@ var AppProcess = function (options) {
   self.nodePath = options.nodePath || [];
   self.debugPort = options.debugPort;
   self.settings = options.settings;
+  self.testMetadata = options.testMetadata;
 
   self.proc = null;
   self.madeExitCallback = false;
@@ -137,15 +138,6 @@ _.extend(AppProcess.prototype, {
     // exception and the whole app dies.
     // http://stackoverflow.com/questions/2893458/uncatchable-errors-in-node-js
     self.proc.stdin.on('error', function () {});
-
-    // When the parent process exits (i.e. the server is shutting down and
-    // not merely restarting), make sure to disconnect any still-connected
-    // shell clients.
-    require('../tool-env/cleanup.js').onExit(function() {
-      require('../static-assets/server/shell-server.js').disable(
-        self.projectContext.getMeteorShellDirectory()
-      );
-    });
   },
 
   _maybeCallOnExit: function (code, signal) {
@@ -193,6 +185,11 @@ _.extend(AppProcess.prototype, {
     } else {
       delete env.METEOR_SETTINGS;
     }
+    if (self.testMetadata) {
+      env.TEST_METADATA = JSON.stringify(self.testMetadata);
+    } else {
+      delete env.TEST_METADATA; 
+    }
     if (self.listenHost) {
       env.BIND_IP = self.listenHost;
     } else {
@@ -200,8 +197,6 @@ _.extend(AppProcess.prototype, {
     }
     env.APP_ID = self.projectContext.appIdentifier;
 
-    // Display errors from (eg) the NPM connect module over the network.
-    env.NODE_ENV = 'development';
     // We run the server behind our own proxy, so we need to increment
     // the HTTP forwarded count.
     env.HTTP_FORWARDED_COUNT =
@@ -245,9 +240,9 @@ _.extend(AppProcess.prototype, {
     if (self.debugPort) {
       attach = require('../inspector.js').start(self.debugPort, entryPoint);
 
-      // If you do opts.push("--debug-brk", port) it doesn't work on Windows
-      // for some reason
-      opts.push("--debug-brk=" + attach.suggestedDebugBrkPort);
+      // If you do opts.push("--debug", port) it doesn't work on Windows
+      // for some reason.
+      opts.push("--debug=" + attach.suggestedDebugBrkPort);
     }
 
     opts.push(entryPoint);
@@ -359,6 +354,7 @@ var AppRunner = function (options) {
   self.mobileServerUrl = options.mobileServerUrl;
   self.cordovaRunner = options.cordovaRunner;
   self.settingsFile = options.settingsFile;
+  self.testMetadata = options.testMetadata;
   self.debugPort = options.debugPort;
   self.proxy = options.proxy;
   self.watchForChanges =
@@ -384,6 +380,10 @@ var AppRunner = function (options) {
   // is communicating to the app process over ipc. If an error in communication
   // occurs, we can distinguish it in a callback handling the 'error' event.
   self._refreshing = false;
+
+  // Builders saved across rebuilds, so that targets can be re-written in
+  // place instead of created again from scratch.
+  self.builders = {};
 };
 
 _.extend(AppRunner.prototype, {
@@ -491,9 +491,6 @@ _.extend(AppRunner.prototype, {
     // a single invocation of _runOnce().
     var cachedServerWatchSet;
 
-    // Builders saved from previous iterations
-    var builders = {};
-
     var bundleApp = function () {
       if (! firstRun) {
         // If the build fails in a way that could be fixed by a refresh, allow
@@ -572,7 +569,7 @@ _.extend(AppRunner.prototype, {
         });
       }
 
-      var bundleResult = Profile.run("Rebuild App", function () {
+      var bundleResult = Profile.run((firstRun?"B":"Reb")+"uild App", () => {
         var includeNodeModules = 'symlink';
 
         // On Windows we cannot symlink node_modules. Copying them is too slow.
@@ -588,11 +585,11 @@ _.extend(AppRunner.prototype, {
           includeNodeModules: includeNodeModules,
           buildOptions: self.buildOptions,
           hasCachedBundle: !! cachedServerWatchSet,
-          previousBuilders: builders
+          previousBuilders: self.builders
         });
 
         // save new builders with their caches
-        ({builders} = bundleResult);
+        self.builders = bundleResult.builders;
 
         return bundleResult;
       });
@@ -741,6 +738,7 @@ _.extend(AppRunner.prototype, {
       nodeOptions: getNodeOptionsFromEnvironment(),
       nodePath: _.map(bundleResult.nodePath, files.convertToOSPath),
       settings: settings,
+      testMetadata: self.testMetadata,
       ipcPipe: self.watchForChanges
     });
 
@@ -829,18 +827,24 @@ _.extend(AppRunner.prototype, {
 
         maybePrintLintWarnings(bundleResult);
 
+        runLog.logClientRestart();
+
         var oldPromise = self.runPromise = self._makePromise("run");
 
         // Notify the server that new client assets have been added to the
         // build.
         self._refreshing = true;
-        appProcess.proc.send({ refresh: 'client' });
-        self._refreshing = false;
+        // ChildProcess.prototype.send used to be synchronous, but is now
+        // asynchronous: https://github.com/nodejs/node/pull/2620
+        appProcess.proc.send({
+          refresh: 'client'
+        }, err => {
+          self._refreshing = false;
+          if (err) throw err;
+        });
 
         // Establish a watcher on the new files.
         setupClientWatcher();
-
-        runLog.logClientRestart();
 
         // Wait until another file changes.
         ret = oldPromise.await();
@@ -874,13 +878,14 @@ _.extend(AppRunner.prototype, {
       var resetCrashCount = function () {
         crashTimer = setTimeout(function () {
           crashCount = 0;
-        }, 3000);
+        }, 8000);
       };
 
       var runResult = self._runOnce({
         onListen: function () {
           if (! self.noRestartBanner && ! firstRun) {
             runLog.logRestart();
+            Console.enableProgressDisplay(false);
           }
         },
         beforeRun: resetCrashCount,

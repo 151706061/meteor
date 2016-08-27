@@ -271,6 +271,14 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
       return ret;
     },
 
+    _getOption(name, options) {
+      if (options && _.has(options, name)) {
+        return options[name];
+      }
+      const fileOptions = this.fileOptions;
+      return fileOptions && fileOptions[name];
+    },
+
     /**
      * @summary Works in web targets only. Add markup to the `head` or `body`
      * section of the document.
@@ -294,7 +302,8 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
       }
       resources.push({
         type: options.section,
-        data: new Buffer(files.convertToStandardLineEndings(options.data), 'utf8')
+        data: new Buffer(files.convertToStandardLineEndings(options.data), 'utf8'),
+        lazy: this._getOption("lazy", options),
       });
     },
 
@@ -334,7 +343,8 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
             inputSourceArch.pkg.serveRoot,
             files.convertToStandardPath(options.path, true))),
         sourceMap: convertSourceMapPaths(options.sourceMap,
-                                         files.convertToStandardPath)
+                                         files.convertToStandardPath),
+        lazy: this._getOption("lazy", options),
       });
     },
 
@@ -357,15 +367,17 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
       if (typeof options.data !== "string") {
         throw new Error("'data' option to addJavaScript must be a string");
       }
-      if (typeof options.sourcePath !== "string") {
-        throw new Error("'sourcePath' option must be supplied to addJavaScript. Consider passing inputPath.");
+
+      let sourcePath = this.inputPath;
+      if (_.has(options, "sourcePath") &&
+          typeof options.sourcePath === "string") {
+        sourcePath = options.sourcePath;
       }
 
-      // By default, use fileOptions for the `bare` option but also allow
-      // overriding it with the options
-      var bare = fileOptions.bare;
-      if (options.hasOwnProperty("bare")) {
-        bare = options.bare;
+      const targetPath = options.path || sourcePath;
+
+      if (typeof sourcePath !== "string") {
+        throw new Error("'sourcePath' option must be supplied to addJavaScript. Consider passing inputPath.");
       }
 
       var data = new Buffer(
@@ -373,18 +385,18 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
       resources.push({
         type: "js",
         data: data,
-        // XXX Weirdly, we now ignore sourcePath even though we required
-        //     it before. We used to use it as the source path in source map
-        //     generated in linker. We now use the servePath for that, as of
-        //     b556e622. Not sure this is actually correct...
+        sourcePath,
+        targetPath,
         servePath: colonConverter.convert(
           files.pathJoin(
             inputSourceArch.pkg.serveRoot,
-            files.convertToStandardPath(options.path, true))),
+            files.convertToStandardPath(targetPath, true))),
         hash: watch.sha1(data),
         sourceMap: convertSourceMapPaths(options.sourceMap,
                                          files.convertToStandardPath),
-        bare: !! bare
+        lazy: this._getOption("lazy", options),
+        bare: !! this._getOption("bare", options),
+        mainModule: !! this._getOption("mainModule", options),
       });
     },
 
@@ -423,12 +435,39 @@ exports.makeCompileStep = function (sourceItem, file, inputSourceArch, options) 
      * @instance
      */
     error: function (options) {
-      buildmessage.error(options.message || ("error building " + relPath), {
-        file: options.sourcePath,
-        line: options.line ? options.line : undefined,
-        column: options.column ? options.column : undefined,
-        func: options.func ? options.func : undefined
-      });
+      let sourcePath = this.inputPath;
+      if (_.has(options, "sourcePath") &&
+          typeof options.sourcePath === "string") {
+        sourcePath = options.sourcePath;
+      }
+
+      const message = options.message || ("error building " + relPath);
+
+      const info = { file: sourcePath };
+      if (options.line) info.line = options.line;
+      if (options.column) info.column = options.column;
+      if (options.func) info.func = options.func;
+
+      if (compileStep._getOption("lazy") === true) {
+        // Because this file is lazy, it might not have been explicitly
+        // added in package.js, so we should ignore compilation errors
+        // until and unless it is ever actually imported.
+        resources.push({
+          type: "js",
+          sourcePath,
+          targetPath: sourcePath,
+          servePath: sourcePath,
+          data: new Buffer(
+            "throw new Error(" + JSON.stringify(message) + ");\n",
+            "utf8"),
+          lazy: true,
+          error: { message, info },
+        });
+
+        return;
+      }
+
+      buildmessage.error(message, info);
     }
   };
 

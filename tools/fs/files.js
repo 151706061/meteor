@@ -4,6 +4,7 @@
 /// (such as testing whether an directory is a meteor app)
 ///
 
+var assert = require("assert");
 var fs = require("fs");
 var path = require('path');
 var os = require('os');
@@ -11,6 +12,7 @@ var util = require('util');
 var _ = require('underscore');
 var Fiber = require('fibers');
 var crypto = require('crypto');
+var spawn = require("child_process").spawn;
 
 var rimraf = require('rimraf');
 var sourcemap = require('source-map');
@@ -259,20 +261,30 @@ files.prettyPath = function (p) {
 
 // Like statSync, but null if file not found
 files.statOrNull = function (path) {
+  return statOrNull(path);
+};
+
+function statOrNull(path, preserveSymlinks) {
   try {
-    return files.stat(path);
+    return preserveSymlinks
+      ? files.lstat(path)
+      : files.stat(path);
   } catch (e) {
-    if (e.code == "ENOENT") {
+    if (e.code === "ENOENT") {
       return null;
     }
     throw e;
   }
-};
+}
 
 // Like rm -r.
 files.rm_recursive = Profile("files.rm_recursive", function (p) {
   if (Fiber.current && Fiber.yield && ! Fiber.yield.disallowed) {
-    Promise.denodeify(rimraf)(files.convertToOSPath(p)).await();
+    new Promise((resolve, reject) => {
+      rimraf(files.convertToOSPath(p), err => {
+        err ? reject(err) : resolve();
+      });
+    }).await();
   } else {
     rimraf.sync(files.convertToOSPath(p));
   }
@@ -428,9 +440,7 @@ files.mkdir_p = function (dir, mode) {
   return pathIsDirectory(p);
 };
 
-// Roughly like cp -R. 'from' should be a directory. 'to' can either
-// be a directory, or it can not exist (in which case it will be
-// created with mkdir_p).
+// Roughly like cp -R.
 //
 // The output files will be readable and writable by everyone that the umask
 // allows, and executable by everyone (modulo umask) if the original file was
@@ -444,49 +454,61 @@ files.mkdir_p = function (dir, mode) {
 // If options.ignore is present, it should be a list of regexps. Any
 // file whose basename matches one of the regexps, before
 // transformation, will be skipped.
-files.cp_r = function (from, to, options) {
-  options = options || {};
+files.cp_r = function(from, to, options = {}) {
+  from = files.pathResolve(from);
 
-  var absFrom = files.pathResolve(from);
-  files.mkdir_p(to, 0o755);
+  const stat = statOrNull(from, options.preserveSymlinks);
+  if (! stat) {
+    return;
+  }
 
-  _.each(files.readdir(from), function (f) {
-    if (_.any(options.ignore || [], function (pattern) {
-      return f.match(pattern);
-    })) {
-      return;
-    }
+  if (stat.isDirectory()) {
+    files.mkdir_p(to, 0o755);
 
-    var fullFrom = files.pathJoin(from, f);
-    if (options.transformFilename) {
-      f = options.transformFilename(f);
-    }
-    var fullTo = files.pathJoin(to, f);
-    var stats = options.preserveSymlinks
-          ? files.lstat(fullFrom) : files.stat(fullFrom);
-    if (stats.isDirectory()) {
-      files.cp_r(fullFrom, fullTo, options);
-    } else if (stats.isSymbolicLink()) {
-      var linkText = files.readlink(fullFrom);
-      files.symlink(linkText, fullTo);
-    } else {
-      var absFullFrom = files.pathResolve(fullFrom);
-
-      // Create the file as readable and writable by everyone, and executable by
-      // everyone if the original file is executably by owner. (This mode will
-      // be modified by umask.) We don't copy the mode *directly* because this
-      // function is used by 'meteor create' which is copying from the read-only
-      // tools tree into a writable app.
-      var mode = (stats.mode & 0o100) ? 0o777 : 0o666;
-      if (!options.transformContents) {
-        copyFileHelper(fullFrom, fullTo, mode);
-      } else {
-        var contents = files.readFile(fullFrom);
-        contents = options.transformContents(contents, f);
-        files.writeFile(fullTo, contents, { mode: mode });
+    files.readdir(from).forEach(f => {
+      if (options.ignore &&
+          _.any(options.ignore,
+                pattern => f.match(pattern))) {
+        return;
       }
+
+      if (options.transformFilename) {
+        f = options.transformFilename(f);
+      }
+
+      files.cp_r(
+        files.pathJoin(from, f),
+        files.pathJoin(to, f),
+        options
+      );
+    })
+
+    return;
+  }
+
+  files.mkdir_p(files.pathDirname(to));
+
+  if (stat.isSymbolicLink()) {
+    files.symlink(files.readlink(from), to);
+
+  } else {
+    // Create the file as readable and writable by everyone, and
+    // executable by everyone if the original file is executable by
+    // owner. (This mode will be modified by umask.) We don't copy the
+    // mode *directly* because this function is used by 'meteor create'
+    // which is copying from the read-only tools tree into a writable app.
+    const mode = (stat.mode & 0o100) ? 0o777 : 0o666;
+
+    if (options.transformContents) {
+      files.writeFile(to, options.transformContents(
+        files.readFile(from),
+        files.pathBasename(from)
+      ), { mode });
+
+    } else {
+      copyFileHelper(from, to, mode);
     }
-  });
+  }
 };
 
 /**
@@ -553,12 +575,15 @@ files.findPathsWithRegex = function (dir, regex, options) {
 // Copies a file, which is expected to exist. Parent directories of "to" do not
 // have to exist. Treats symbolic links transparently (copies the contents, not
 // the link itself, and it's an error if the link doesn't point to a file).
-files.copyFile = function (from, to) {
+files.copyFile = function (from, to, origMode=null) {
   files.mkdir_p(files.pathDirname(files.pathResolve(to)), 0o755);
 
-  var stats = files.stat(from);
-  if (!stats.isFile()) {
-    throw Error("cannot copy non-files");
+  if (origMode === null) {
+    var stats = files.stat(from);
+    if (!stats.isFile()) {
+      throw Error("cannot copy non-files");
+    }
+    origMode = stats.mode;
   }
 
   // Create the file as readable and writable by everyone, and executable by
@@ -566,10 +591,11 @@ files.copyFile = function (from, to) {
   // modified by umask.) We don't copy the mode *directly* because this function
   // is used by 'meteor create' which is copying from the read-only tools tree
   // into a writable app.
-  var mode = (stats.mode & 0o100) ? 0o777 : 0o666;
+  var mode = (origMode & 0o100) ? 0o777 : 0o666;
 
   copyFileHelper(from, to, mode);
 };
+files.copyFile = Profile("files.copyFile", files.copyFile);
 
 var copyFileHelper = function (from, to, mode) {
   var readStream = files.createReadStream(from);
@@ -686,19 +712,154 @@ files.extractTarGz = function (buffer, destPath, options) {
   var tempDir = files.pathJoin(parentDir, '.tmp' + utils.randomToken());
   files.mkdir_p(tempDir);
 
+  if (! _.has(options, "verbose")) {
+    options.verbose = require("../console/console.js").Console.verbose;
+  }
+
+  const startTime = +new Date;
+  let promise = tryExtractWithNativeTar(buffer, tempDir, options);
+
+  if (process.platform === "win32") {
+    promise = promise.catch(
+      error => tryExtractWithNative7z(buffer, tempDir, options)
+    );
+  }
+
+  promise = promise.catch(
+    error => tryExtractWithNpmTar(buffer, tempDir, options)
+  );
+
+  promise.await();
+
+  // succeed!
+  var topLevelOfArchive = files.readdir(tempDir)
+    // On Windows, the 7z.exe tool sometimes creates an auxiliary
+    // PaxHeader directory.
+    .filter(file => ! file.startsWith("PaxHeader"));
+
+  if (topLevelOfArchive.length !== 1) {
+    throw new Error(
+      "Extracted archive '" + tempDir + "' should only contain one entry");
+  }
+
+  var extractDir = files.pathJoin(tempDir, topLevelOfArchive[0]);
+  makeTreeReadOnly(extractDir);
+  files.rename(extractDir, destPath);
+  files.rm_recursive(tempDir);
+
+  if (options.verbose) {
+    console.log("Finished extracting in", new Date - startTime, "ms");
+  }
+};
+
+function ensureDirectoryEmpty(dir) {
+  files.readdir(dir).forEach(file => {
+    files.rm_recursive(files.pathJoin(dir, file));
+  });
+}
+
+function tryExtractWithNativeTar(buffer, tempDir, options) {
+  ensureDirectoryEmpty(tempDir);
+
+  if (options.forceConvert) {
+    return Promise.reject(new Error(
+      "Native tar cannot convert colons in package names"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const flags = options.verbose ? "-xzvf" : "-xzf";
+    const tarProc = spawn("tar", [flags, "-"], {
+      cwd: files.convertToOSPath(tempDir),
+      stdio: options.verbose ? [
+        "pipe", // Always need to write to tarProc.stdin.
+        process.stdout,
+        process.stderr
+      ] : "pipe",
+    });
+
+    tarProc.on("error", reject);
+    tarProc.on("exit", resolve);
+
+    tarProc.stdin.write(buffer);
+    tarProc.stdin.end();
+  });
+}
+
+function tryExtractWithNative7z(buffer, tempDir, options) {
+  ensureDirectoryEmpty(tempDir);
+
+  if (options.forceConvert) {
+    return Promise.reject(new Error(
+      "Native 7z.exe cannot convert colons in package names"));
+  }
+
+  const exeOSPath = files.convertToOSPath(
+    files.pathJoin(files.getCurrentNodeBinDir(), "7z.exe"));
+  const tarGzBasename = "out.tar.gz";
+  const spawnOptions = {
+    cwd: files.convertToOSPath(tempDir),
+    stdio: options.verbose ? "inherit" : "pipe",
+  };
+
+  files.writeFile(files.pathJoin(tempDir, tarGzBasename), buffer);
+
+  return new Promise((resolve, reject) => {
+    spawn(exeOSPath, [
+      "x", "-y", tarGzBasename
+    ], spawnOptions)
+      .on("error", reject)
+      .on("exit", resolve);
+
+  }).then(code => {
+    assert.strictEqual(code, 0);
+
+    let tarBasename;
+    const foundTar = files.readdir(tempDir).some(file => {
+      if (file !== tarGzBasename) {
+        tarBasename = file;
+        return true;
+      }
+    });
+
+    assert.ok(foundTar, "failed to find .tar file");
+
+    function cleanUp() {
+      files.unlink(files.pathJoin(tempDir, tarGzBasename));
+      files.unlink(files.pathJoin(tempDir, tarBasename));
+    }
+
+    return new Promise((resolve, reject) => {
+      spawn(exeOSPath, [
+        "x", "-y", tarBasename
+      ], spawnOptions)
+        .on("error", reject)
+        .on("exit", resolve);
+
+    }).then(code => {
+      cleanUp();
+      return code;
+    }, error => {
+      cleanUp();
+      throw error;
+    });
+  });
+}
+
+function tryExtractWithNpmTar(buffer, tempDir, options) {
+  ensureDirectoryEmpty(tempDir);
+
   var tar = require("tar");
   var zlib = require("zlib");
 
-  new Promise(function (resolve, reject) {
+  return new Promise((resolve, reject) => {
     var gunzip = zlib.createGunzip().on('error', reject);
-
     var extractor = new tar.Extract({
       path: files.convertToOSPath(tempDir)
     }).on('entry', function (e) {
       if (process.platform === "win32" || options.forceConvert) {
-        // On Windows, try to convert old packages that have colons in paths
-        // by blindly replacing all of the paths. Otherwise, we can't even
-        // extract the tarball
+        // On Windows, try to convert old packages that have colons in
+        // paths by blindly replacing all of the paths. Otherwise, we
+        // can't even extract the tarball
         e.path = colonConverter.convert(e.path);
       }
     }).on('error', reject)
@@ -709,20 +870,8 @@ files.extractTarGz = function (buffer, destPath, options) {
     gunzip.pipe(extractor);
     gunzip.write(buffer);
     gunzip.end();
-  }).await();
-
-  // succeed!
-  var topLevelOfArchive = files.readdir(tempDir);
-  if (topLevelOfArchive.length !== 1) {
-    throw new Error(
-      "Extracted archive '" + tempDir + "' should only contain one entry");
-  }
-
-  var extractDir = files.pathJoin(tempDir, topLevelOfArchive[0]);
-  makeTreeReadOnly(extractDir);
-  files.rename(extractDir, destPath);
-  files.rmdir(tempDir);
-};
+  });
+}
 
 // Tar-gzips a directory, returning a stream that can then be piped as
 // needed.  The tar archive will contain a top-level directory named
@@ -823,14 +972,23 @@ files.renameDirAlmostAtomically = function (fromDir, toDir) {
     files.rm_recursive(garbageDir);
   }
 };
+files.renameDirAlmostAtomically = Profile("files.renameDirAlmostAtomically",
+                                          files.renameDirAlmostAtomically);
 
 files.writeFileAtomically = function (filename, contents) {
-  var tmpFile = files.pathJoin(
-    files.pathDirname(filename),
-    '.' + files.pathBasename(filename) + '.' + utils.randomToken());
+  const parentDir = files.pathDirname(filename);
+  files.mkdir_p(parentDir);
+
+  const tmpFile = files.pathJoin(
+    parentDir,
+    '.' + files.pathBasename(filename) + '.' + utils.randomToken()
+  );
+
   files.writeFile(tmpFile, contents);
   files.rename(tmpFile, filename);
 };
+files.writeFileAtomically = Profile("files.writeFileAtomically",
+                                    files.writeFileAtomically);
 
 // Like fs.symlinkSync, but creates a temporay link and renames it over the
 // file; this means it works even if the file already exists.
@@ -871,126 +1029,130 @@ files.runJavaScript = function (code, options) {
 
   options = options || {};
   var filename = options.filename || "<anonymous>";
-  var keys = [], values = [];
-  // don't assume that _.keys and _.values are guaranteed to
-  // enumerate in the same order
-  _.each(options.symbols, function (value, name) {
-    keys.push(name);
-    values.push(value);
-  });
 
-  var stackFilename = filename;
-  if (options.sourceMap) {
-    // We want to generate an arbitrary filename that we use to associate the
-    // file with its source map.
-    stackFilename = "<runJavaScript-" + nextStackFilenameCounter++ + ">";
-  }
+  return Profile.time('runJavaScript ' + filename, () => {
 
-  var chunks = [];
-  var header = "(function(" + keys.join(',') + "){";
-  chunks.push(header);
-  if (options.sourceMap) {
-    var consumer = new sourcemap.SourceMapConsumer(options.sourceMap);
-    chunks.push(sourcemap.SourceNode.fromStringWithSourceMap(
-      code, consumer));
-  } else {
-    chunks.push(code);
-  }
-  // \n is necessary in case final line is a //-comment
-  chunks.push("\n})");
-
-  var wrapped;
-  var parsedSourceMap = null;
-  if (options.sourceMap) {
-    var node = new sourcemap.SourceNode(null, null, null, chunks);
-    var results = node.toStringWithSourceMap({
-      file: stackFilename
+    var keys = [], values = [];
+    // don't assume that _.keys and _.values are guaranteed to
+    // enumerate in the same order
+    _.each(options.symbols, function (value, name) {
+      keys.push(name);
+      values.push(value);
     });
-    wrapped = results.code;
-    parsedSourceMap = results.map.toJSON();
-    if (options.sourceMapRoot) {
-      // Add the specified root to any root that may be in the file.
-      parsedSourceMap.sourceRoot = files.pathJoin(
-        options.sourceMapRoot, parsedSourceMap.sourceRoot || '');
-    }
-    // source-map-support doesn't ever look at the sourcesContent field, so
-    // there's no point in keeping it in memory.
-    delete parsedSourceMap.sourcesContent;
-    parsedSourceMaps[stackFilename] = parsedSourceMap;
-  } else {
-    wrapped = chunks.join('');
-  };
 
-  try {
-    // See #runInThisContext
-    //
-    // XXX it'd be nice to runInNewContext so that the code can't mess
-    // with our globals, but objects that come out of runInNewContext
-    // have bizarro antimatter prototype chains and break 'instanceof
-    // Array'. for now, steer clear
-    //
-    // Pass 'true' as third argument if we want the parse error on
-    // stderr (which we don't).
-    var script = require('vm').createScript(wrapped, stackFilename);
-  } catch (nodeParseError) {
-    if (!(nodeParseError instanceof SyntaxError)) {
+    var stackFilename = filename;
+    if (options.sourceMap) {
+      // We want to generate an arbitrary filename that we use to associate the
+      // file with its source map.
+      stackFilename = "<runJavaScript-" + nextStackFilenameCounter++ + ">";
+    }
+
+    var chunks = [];
+    var header = "(function(" + keys.join(',') + "){";
+    chunks.push(header);
+    if (options.sourceMap) {
+      var consumer = new sourcemap.SourceMapConsumer(options.sourceMap);
+      chunks.push(sourcemap.SourceNode.fromStringWithSourceMap(
+        code, consumer));
+    } else {
+      chunks.push(code);
+    }
+    // \n is necessary in case final line is a //-comment
+    chunks.push("\n})");
+
+    var wrapped;
+    var parsedSourceMap = null;
+    if (options.sourceMap) {
+      var node = new sourcemap.SourceNode(null, null, null, chunks);
+      var results = node.toStringWithSourceMap({
+        file: stackFilename
+      });
+      wrapped = results.code;
+      parsedSourceMap = results.map.toJSON();
+      if (options.sourceMapRoot) {
+        // Add the specified root to any root that may be in the file.
+        parsedSourceMap.sourceRoot = files.pathJoin(
+          options.sourceMapRoot, parsedSourceMap.sourceRoot || '');
+      }
+      // source-map-support doesn't ever look at the sourcesContent field, so
+      // there's no point in keeping it in memory.
+      delete parsedSourceMap.sourcesContent;
+      parsedSourceMaps[stackFilename] = parsedSourceMap;
+    } else {
+      wrapped = chunks.join('');
+    };
+
+    try {
+      // See #runInThisContext
+      //
+      // XXX it'd be nice to runInNewContext so that the code can't mess
+      // with our globals, but objects that come out of runInNewContext
+      // have bizarro antimatter prototype chains and break 'instanceof
+      // Array'. for now, steer clear
+      //
+      // Pass 'true' as third argument if we want the parse error on
+      // stderr (which we don't).
+      var script = require('vm').createScript(wrapped, stackFilename);
+    } catch (nodeParseError) {
+      if (!(nodeParseError instanceof SyntaxError)) {
+        throw nodeParseError;
+      }
+      // Got a parse error. Unfortunately, we can't actually get the
+      // location of the parse error from the SyntaxError; Node has some
+      // hacky support for displaying it over stderr if you pass an
+      // undocumented third argument to stackFilename, but that's not
+      // what we want. See
+      //    https://github.com/joyent/node/issues/3452
+      // for more information. One thing to try (and in fact, what an
+      // early version of this function did) is to actually fork a new
+      // node to run the code and parse its output. We instead run an
+      // entirely different JS parser, from the Babel project, but
+      // which at least has a nice API for reporting errors.
+      var parse = require('meteor-babel').parse;
+      try {
+        parse(wrapped, { strictMode: false });
+      } catch (parseError) {
+        if (typeof parseError.loc !== "object") {
+          throw parseError;
+        }
+
+        var err = new files.FancySyntaxError;
+        err.message = parseError.message;
+
+        if (parsedSourceMap) {
+          // XXX this duplicates code in computeGlobalReferences
+          var consumer2 = new sourcemap.SourceMapConsumer(parsedSourceMap);
+          var original = consumer2.originalPositionFor(parseError.loc);
+          if (original.source) {
+            err.file = original.source;
+            err.line = original.line;
+            err.column = original.column;
+            throw err;
+          }
+        }
+
+        err.file = filename;  // *not* stackFilename
+        err.line = parseError.loc.line;
+        err.column = parseError.loc.column;
+
+        // adjust errors on line 1 to account for our header
+        if (err.line === 1) {
+          err.column -= header.length;
+        }
+
+        throw err;
+      }
+
+      // What? Node thought that this was a parse error and Babel didn't?
+      // Eh, just throw Node's error and don't care too much about the line
+      // numbers being right.
       throw nodeParseError;
     }
-    // Got a parse error. Unfortunately, we can't actually get the
-    // location of the parse error from the SyntaxError; Node has some
-    // hacky support for displaying it over stderr if you pass an
-    // undocumented third argument to stackFilename, but that's not
-    // what we want. See
-    //    https://github.com/joyent/node/issues/3452
-    // for more information. One thing to try (and in fact, what an
-    // early version of this function did) is to actually fork a new
-    // node to run the code and parse its output. We instead run an
-    // entirely different JS parser, from the Babel project, but
-    // which at least has a nice API for reporting errors.
-    var parse = require('meteor-babel').parse;
-    try {
-      parse(wrapped, { strictMode: false });
-    } catch (parseError) {
-      if (typeof parseError.loc !== "object") {
-        throw parseError;
-      }
 
-      var err = new files.FancySyntaxError;
-      err.message = parseError.message;
+    var func = script.runInThisContext();
 
-      if (parsedSourceMap) {
-        // XXX this duplicates code in computeGlobalReferences
-        var consumer2 = new sourcemap.SourceMapConsumer(parsedSourceMap);
-        var original = consumer2.originalPositionFor(parseError.loc);
-        if (original.source) {
-          err.file = original.source;
-          err.line = original.line;
-          err.column = original.column;
-          throw err;
-        }
-      }
-
-      err.file = filename;  // *not* stackFilename
-      err.line = parseError.loc.line;
-      err.column = parseError.loc.column;
-
-      // adjust errors on line 1 to account for our header
-      if (err.line === 1) {
-        err.column -= header.length;
-      }
-
-      throw err;
-    }
-
-    // What? Node thought that this was a parse error and Babel didn't?
-    // Eh, just throw Node's error and don't care too much about the line
-    // numbers being right.
-    throw nodeParseError;
-  }
-
-  var func = script.runInThisContext();
-
-  return (buildmessage.markBoundary(func)).apply(null, values);
+    return (buildmessage.markBoundary(func)).apply(null, values);
+  });
 };
 
 // - message: an error message from the parser
@@ -1321,8 +1483,16 @@ function wrapFsFunc(fsFuncName, pathArgIndices, options) {
 
       const canYield = Fiber.current && Fiber.yield && ! Fiber.yield.disallowed;
       const shouldBeSync = alwaysSync || sync;
+      // There's some overhead in awaiting a Promise of an async call,
+      // vs just doing the sync call, which for a call like "stat"
+      // takes longer than the call itself.  Different parts of the tool
+      // may perform 1,000s or 10,000s of stats each under certain
+      // conditions, so we get a nice performance boost from making
+      // these calls sync.
+      const isQuickie = (fsFuncName === 'stat' ||
+                         fsFuncName === 'rename');
 
-      if (canYield && shouldBeSync) {
+      if (canYield && shouldBeSync && !isQuickie) {
         const promise = new Promise((resolve, reject) => {
           args.push((err, value) => {
             if (options.noErr) {
@@ -1359,14 +1529,17 @@ function wrapFsFunc(fsFuncName, pathArgIndices, options) {
           cb = null;
         }
 
-        Promise.denodeify(fsFunc)
-          .apply(fs, args)
-          .then(function (res) {
-            if (options.modifyReturnValue) {
-              res = options.modifyReturnValue(res);
-            }
-            cb && cb(null, res);
-          }, cb);
+        new Promise((resolve, reject) => {
+          args.push((err, res) => {
+            err ? reject(err) : resolve(res);
+          });
+          fsFunc.apply(fs, args);
+        }).then(res => {
+          if (options.modifyReturnValue) {
+            res = options.modifyReturnValue(res);
+          }
+          cb && cb(null, res);
+        }, cb);
 
         return;
       }
@@ -1399,8 +1572,78 @@ wrapFsFunc("readFile", [0], {
 });
 wrapFsFunc("stat", [0]);
 wrapFsFunc("lstat", [0]);
-wrapFsFunc("exists", [0], {noErr: true});
 wrapFsFunc("rename", [0, 1]);
+
+// After the outermost files.withCache call returns, the withCacheCache is
+// reset to null so that it does not survive server restarts.
+let withCacheCache = null;
+
+files.withCache = Profile("files.withCache", function (fn) {
+  const oldCache = withCacheCache;
+  withCacheCache = oldCache || Object.create(null);
+  try {
+    return fn();
+  } finally {
+    withCacheCache = oldCache;
+  }
+});
+
+function enableCache(name) {
+  const method = files[name];
+
+  function makeCacheKey(args) {
+    var parts = [name];
+
+    for (var i = 0; i < args.length; ++i) {
+      var arg = args[i];
+
+      if (typeof arg !== "string") {
+        // If any of the arguments is not a string, then we won't cache
+        // the result of the corresponding file.* method invocation.
+        return null;
+      }
+
+      parts.push(arg);
+    }
+
+    return parts.join("\0");
+  }
+
+  files[name] = function (...args) {
+    if (withCacheCache) {
+      var cacheKey = makeCacheKey(args);
+      if (cacheKey && cacheKey in withCacheCache) {
+        return withCacheCache[cacheKey];
+      }
+    }
+
+    const result = method.apply(files, args);
+
+    if (withCacheCache && cacheKey !== null) {
+      // If cacheKey === null, then we called makeCacheKey above and it
+      // failed because one of the arguments was not a string, so we
+      // should not try to call makeCacheKey again.
+      withCacheCache[cacheKey || makeCacheKey(args)] = result;
+    }
+
+    return result;
+  };
+}
+
+enableCache("readdir");
+enableCache("realpath");
+enableCache("stat");
+enableCache("lstat");
+
+// The fs.exists method is deprecated in Node v4:
+// https://nodejs.org/api/fs.html#fs_fs_exists_path_callback
+files.exists =
+files.existsSync = function (path, callback) {
+  if (typeof callback === "function") {
+    throw new Error("Passing a callback to files.exists is no longer supported");
+  }
+  return !! files.statOrNull(path);
+};
 
 if (process.platform === "win32") {
   var rename = files.rename;

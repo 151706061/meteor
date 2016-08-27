@@ -36,7 +36,11 @@ WebApp.clientPrograms = {};
 // XXX maps archs to program path on filesystem
 var archPath = {};
 
-var bundledJsCssUrlRewriteHook;
+var bundledJsCssUrlRewriteHook = function (url) {
+  var bundledPrefix =
+     __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '';
+  return bundledPrefix + url;
+};
 
 var sha1 = function (contents) {
   var hash = crypto.createHash('sha1');
@@ -218,8 +222,10 @@ WebApp._timeoutAdjustmentRequestCallback = function (req, res) {
   // Insert our new finish listener to run BEFORE the existing one which removes
   // the response from the socket.
   var finishListeners = res.listeners('finish');
-  // XXX Apparently in Node 0.12 this event is now called 'prefinish'.
+  // XXX Apparently in Node 0.12 this event was called 'prefinish'.
   // https://github.com/joyent/node/commit/7c9b6070
+  // But it has switched back to 'finish' in Node v4:
+  // https://github.com/nodejs/node/pull/1411
   res.removeAllListeners('finish');
   res.on('finish', function () {
     res.setTimeout(SHORT_SOCKET_TIMEOUT);
@@ -283,13 +289,6 @@ WebAppInternals.generateBoilerplateInstance = function (arch,
     _.clone(__meteor_runtime_config__),
     additionalOptions.runtimeConfigOverrides || {}
   );
-
-  var jsCssUrlRewriteHook = bundledJsCssUrlRewriteHook || function (url) {
-    var bundledPrefix =
-       __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '';
-    return bundledPrefix + url;
-  };
-
   return new Boilerplate(arch, manifest,
     _.extend({
       pathMapper: function (itemPath) {
@@ -313,7 +312,7 @@ WebAppInternals.generateBoilerplateInstance = function (arch,
         meteorRuntimeConfig: JSON.stringify(
           encodeURIComponent(JSON.stringify(runtimeConfig))),
         rootUrlPathPrefix: __meteor_runtime_config__.ROOT_URL_PATH_PREFIX || '',
-        bundledJsCssUrlRewriteHook: jsCssUrlRewriteHook,
+        bundledJsCssUrlRewriteHook: bundledJsCssUrlRewriteHook,
         inlineScriptsAllowed: WebAppInternals.inlineScriptsAllowed(),
         inline: additionalOptions.inline
       }
@@ -402,10 +401,6 @@ WebAppInternals.staticFilesMiddleware = function (staticFiles, req, res, next) {
     res.setHeader("Content-Type", "text/css; charset=UTF-8");
   } else if (info.type === "json") {
     res.setHeader("Content-Type", "application/json; charset=UTF-8");
-    // XXX if it is a manifest we are serving, set additional headers
-    if (/\/manifest\.json$/.test(pathname)) {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-    }
   }
 
   if (info.hash) {
@@ -503,9 +498,11 @@ var runWebAppServer = function () {
         });
 
         var program = {
+          format: "web-program-pre1",
           manifest: manifest,
           version: WebAppHashing.calculateClientHash(manifest, null, _.pick(
             __meteor_runtime_config__, 'PUBLIC_SETTINGS')),
+          cordovaCompatibilityVersions: clientJson.cordovaCompatibilityVersions,
           PUBLIC_SETTINGS: __meteor_runtime_config__.PUBLIC_SETTINGS
         };
 
@@ -576,9 +573,13 @@ var runWebAppServer = function () {
 
       // Configure CSS injection for the default arch
       // XXX implement the CSS injection for all archs?
-      WebAppInternals.refreshableAssets = {
-        allCss: boilerplateByArch[WebApp.defaultArch].baseData.css
-      };
+      var cssFiles = boilerplateByArch[WebApp.defaultArch].baseData.css;
+      // Rewrite all CSS files (which are written directly to <style> tags)
+      // by autoupdate_client to use the CDN prefix/etc
+      var allCss = _.map(cssFiles, function(cssFile) {
+        return { url: bundledJsCssUrlRewriteHook(cssFile.url) };
+      });
+      WebAppInternals.refreshableAssets = { allCss };
     });
   };
 
@@ -726,7 +727,7 @@ var runWebAppServer = function () {
       try {
         boilerplate = getBoilerplate(request, archKey);
       } catch (e) {
-        Log.error("Error running template: " + e);
+        Log.error("Error running template: " + e.stack);
         res.writeHead(500, headers);
         res.end();
         return undefined;

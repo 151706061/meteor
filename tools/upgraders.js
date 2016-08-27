@@ -211,6 +211,8 @@ the guide about breaking changes here:`,
   },
 
   "1.3.0-split-minifiers-package": function (projectContext) {
+    const packagesFile = projectContext.projectConstraintsFile;
+
     // Minifiers are extracted into a new package called "standard-minifiers"
 
     if (packagesFile.getConstraint('standard-minifiers')) {
@@ -222,7 +224,19 @@ the guide about breaking changes here:`,
         'standard-minifier-js',
       ]);
     }
-    projectContext.projectConstraintsFile.writeIfModified();
+    packagesFile.writeIfModified();
+  },
+
+  "1.4.0-remove-old-dev-bundle-link": function (projectContext) {
+    const oldDevBundleLink =
+      files.pathJoin(projectContext.projectDir, ".meteor", "dev_bundle");
+    files.rm_recursive(oldDevBundleLink);
+  },
+
+  "1.4.1-add-shell-server-package": function (projectContext) {
+    const packagesFile = projectContext.projectConstraintsFile;
+    packagesFile.addPackages(["shell-server"]);
+    packagesFile.writeIfModified();
   },
 
   ////////////

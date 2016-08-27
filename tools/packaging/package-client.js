@@ -11,6 +11,7 @@ var authClient = require('../meteor-services/auth-client.js');
 var catalog = require('./catalog/catalog.js');
 var projectContextModule = require('../project-context.js');
 var colonConverter = require('../utils/colon-converter.js');
+var Profile = require('../tool-env/profile.js').Profile;
 
 // Opens a DDP connection to a package server. Loads the packages needed for a
 // DDP connection, then calls DDP connect to the package server URL in config,
@@ -188,8 +189,11 @@ var _updateServerPackageData = function (dataStore, options) {
       var zlib = require('zlib');
       var colsGzippedBuffer = new Buffer(
         remoteData.collectionsCompressed, 'base64');
-      var gunzip = Promise.denodeify(zlib.gunzip);
-      var colsJSON = gunzip(colsGzippedBuffer).await();
+      var colsJSON = new Promise((resolve, reject) => {
+        zlib.gunzip(colsGzippedBuffer, (err, res) => {
+          err ? reject(err) : resolve(res);
+        });
+      }).await();
       remoteData.collections = JSON.parse(colsJSON);
       delete remoteData.collectionsCompressed;
     }
@@ -222,6 +226,9 @@ var _updateServerPackageData = function (dataStore, options) {
 
   return ret;
 };
+
+_updateServerPackageData = Profile('package-client _updateServerPackageData',
+                                   _updateServerPackageData);
 
 // Returns a logged-in DDP connection to the package server, or null if
 // we cannot log in. If an error unrelated to login occurs
@@ -263,8 +270,11 @@ var bundleSource = function (isopack, includeSources, packageDir) {
   // directory structure that we want (<package name>-<version-source/
   // at the top level).
   _.each(includeSources, function (f) {
-    files.copyFile(files.pathJoin(packageDir, f),
-                   files.pathJoin(sourcePackageDir, f));
+    const from = files.pathJoin(packageDir, f);
+    const to = files.pathJoin(sourcePackageDir, f);
+    if (files.exists(from)) {
+      files.copyFile(from, to);
+    }
   });
 
   // Write a package map to `.versions` inside the source tarball.  Note that
@@ -337,7 +347,7 @@ var uploadFile = function (putUrl, filepath) {
 
 exports.uploadFile = uploadFile;
 
-var bundleBuild = function (isopack) {
+export function bundleBuild(isopack, isopackCache) {
   buildmessage.assertInJob();
 
   var tempDir = files.mkdtemp('bp-');
@@ -351,7 +361,8 @@ var bundleBuild = function (isopack) {
   isopack.saveToPath(tarInputDir, {
     // When publishing packages that don't use new registerCompiler plugins,
     // make sure that old Meteors can use it too
-    includePreCompilerPluginIsopackVersions: true
+    includePreCompilerPluginIsopackVersions: true,
+    isopackCache,
   });
 
   var buildTarball = files.pathJoin(tempDir, packageTarName + '.tgz');
@@ -377,11 +388,9 @@ var bundleBuild = function (isopack) {
     tarballHash: tarballHash,
     treeHash: treeHash
   };
-};
+}
 
-exports.bundleBuild = bundleBuild;
-
-var createBuiltPackage = function (conn, isopack) {
+function createBuiltPackage(isopack, isopackCache) {
   buildmessage.assertInJob();
   var name = isopack.name;
 
@@ -389,14 +398,14 @@ var createBuiltPackage = function (conn, isopack) {
   // we get from createPackageBuild will expire!
   var bundleResult;
   buildmessage.enterJob("bundling build for " + name, function () {
-    bundleResult = bundleBuild(isopack);
+    bundleResult = bundleBuild(isopack, isopackCache);
   });
   if (buildmessage.jobHasMessages()) {
     return;
   }
 
   return bundleResult;
-};
+}
 
 var publishBuiltPackage = function (conn, isopack, bundleResult) {
   buildmessage.assertInJob();
@@ -433,11 +442,13 @@ var publishBuiltPackage = function (conn, isopack, bundleResult) {
   }
 };
 
-var createAndPublishBuiltPackage = function (conn, isopack) {
-  publishBuiltPackage(conn, isopack, createBuiltPackage(conn, isopack));
-};
-
-exports.createAndPublishBuiltPackage = createAndPublishBuiltPackage;
+export function createAndPublishBuiltPackage(conn, isopack, isopackCache) {
+  publishBuiltPackage(
+    conn,
+    isopack,
+    createBuiltPackage(isopack, isopackCache),
+  );
+}
 
 // Handle an error thrown on trying to connect to the package server.
 exports.handlePackageServerConnectionError = function (error) {
@@ -755,7 +766,9 @@ exports.publishPackage = function (options) {
     }
 
     if (! options.doNotPublishBuild) {
-      createAndPublishBuiltPackage(conn, isopack);
+      createAndPublishBuiltPackage(
+        conn, isopack, projectContext.isopackCache);
+
       if (buildmessage.jobHasMessages()) {
         return;
       }
@@ -775,6 +788,7 @@ exports.publishPackage = function (options) {
         containsPlugins: packageSource.containsPlugins(),
         debugOnly: packageSource.debugOnly,
         prodOnly: packageSource.prodOnly,
+        testOnly: packageSource.testOnly,
         exports: packageSource.getExports(),
         releaseName: release.current.name,
         dependencies: packageDeps
@@ -806,7 +820,11 @@ exports.publishPackage = function (options) {
     }
 
     if (! options.doNotPublishBuild) {
-      var bundleResult = createBuiltPackage(conn, isopack);
+      var bundleResult = createBuiltPackage(
+        isopack,
+        projectContext.isopackCache,
+      );
+
       if (buildmessage.jobHasMessages()) {
         return;
       }

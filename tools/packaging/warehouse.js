@@ -43,7 +43,9 @@ var files = require('../fs/files.js');
 var httpHelpers = require('../utils/http-helpers.js');
 var fiberHelpers = require('../utils/fiber-helpers.js');
 
-var WAREHOUSE_URLBASE = 'https://warehouse.meteor.com';
+// Use `METEOR_WAREHOUSE_URLBASE` to override the default warehouse
+// url base. 
+var WAREHOUSE_URLBASE = process.env.METEOR_WAREHOUSE_URLBASE || 'https://warehouse.meteor.com';
 
 var warehouse = exports;
 _.extend(warehouse, {
@@ -392,8 +394,13 @@ _.extend(warehouse, {
               "/" + version +
               "/" + name + '-' + version + "-" + platform + ".tar.gz";
 
-        var tarball = httpHelpers.getUrl({url: packageUrl, encoding: null});
+        var tarball = httpHelpers.getUrlWithResuming({
+          url: packageUrl,
+          encoding: null
+        });
+
         files.extractTarGz(tarball, packageDir);
+
         if (!dontWriteFreshFile) {
           files.writeFile(warehouse.getPackageFreshFile(name, version), '');
         }

@@ -1,12 +1,17 @@
 var assert = require("assert");
 var fs = require("fs");
+var path = require("path");
 var net = require("net");
 var eachline = require("eachline");
 var chalk = require("chalk");
 var EOL = require("os").EOL;
-var server = require('./static-assets/server/shell-server.js');
-var EXITING_MESSAGE = server.EXITING_MESSAGE;
-var getInfoFile = server.getInfoFile;
+
+// These two values (EXITING_MESSAGE and getInfoFile) must match the
+// values used by the shell-server package.
+var EXITING_MESSAGE = "Shell exiting...";
+function getInfoFile(shellDir) {
+  return path.join(shellDir, "info.json");
+}
 
 // Invoked by the process running `meteor shell` to attempt to connect to
 // the server via the socket file.
@@ -134,7 +139,7 @@ Cp.setUpSocket = function setUpSocket(sock, key) {
     sock.write(JSON.stringify({
       terminal: ! process.env.EMACS,
       key: key
-    }));
+    }) + "\n");
 
     process.stderr.write(shellBanner());
     process.stdin.pipe(sock);

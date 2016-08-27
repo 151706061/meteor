@@ -31,6 +31,7 @@ Tinytest.add("check - check", function (test) {
     [Infinity, Number],
     [true, Boolean],
     [false, Boolean],
+    [function(){}, Function],
     [undefined, undefined],
     [null, null]
   ];
@@ -73,6 +74,7 @@ Tinytest.add("check - check", function (test) {
           }
         }));
       }
+      if ( type !== null ) fails(null, Match.Optional(type)); // Optional doesn't allow null, but does match on null type
       fails(pair[0], [type]);
       fails(pair[0], Object);
     });
@@ -98,15 +100,42 @@ Tinytest.add("check - check", function (test) {
   fails({a: 1, b:2}, Match.ObjectIncluding({b: String}));
   fails({a: 1, b:2}, Match.ObjectIncluding({c: String}));
   fails({}, {a: Number});
+
+  // Match.Optional does not match on a null value, unless the allowed type is itself "null"
+  fails(null, Match.Optional(String));
+  fails(null, Match.Optional(undefined));
+  matches(null, Match.Optional(null));
+
+  // on the other hand, undefined, works fine for all of them
+  matches(undefined, Match.Optional(String));
+  matches(undefined, Match.Optional(undefined));
+  matches(undefined, Match.Optional(null));
+
+  fails(true, Match.Optional(String)); // different should still fail
+  matches("String", Match.Optional(String)); // same should pass
+
   matches({}, {a: Match.Optional(Number)});
   matches({a: 1}, {a: Match.Optional(Number)});
   fails({a: true}, {a: Match.Optional(Number)});
+  fails({a: undefined}, {a: Match.Optional(Number)});
+
+  // .Maybe requires undefined, null or the allowed type in order to match
+  matches(null, Match.Maybe(String));
+  matches(null, Match.Maybe(undefined));
+  matches(null, Match.Maybe(null));
+
+  matches(undefined, Match.Maybe(String));
+  matches(undefined, Match.Maybe(undefined));
+  matches(undefined, Match.Maybe(null));
+
+  fails(true, Match.Maybe(String)); // different should still fail
+  matches("String", Match.Maybe(String)); // same should pass
+
   matches({}, {a: Match.Maybe(Number)});
   matches({a: 1}, {a: Match.Maybe(Number)});
   fails({a: true}, {a: Match.Maybe(Number)});
   // Match.Optional means "or undefined" at the top level but "or absent" in
   // objects.
-  fails({a: undefined}, {a: Match.Optional(Number)});
   // Match.Maybe should behave the same as Match.Optional in objects
   // including handling nulls
   fails({a: undefined}, {a: Match.Maybe(Number)});
@@ -184,6 +213,36 @@ Tinytest.add("check - check", function (test) {
   fails(childObj, {bar: String});
   fails(childObj, {foo: String});
 
+  // Functions
+  var testFunction = function () {};
+  matches(testFunction, Function);
+  fails(5, Function);
+
+  // Circular Reference "Classes"
+
+  var TestInstanceChild = function () {};
+  var TestInstanceParent = function (child) {
+    child._parent = this;
+    this.child = child;
+  };
+
+  var testInstanceChild = new TestInstanceChild()
+  var testInstanceParent = new TestInstanceParent(testInstanceChild);
+
+  matches(TestInstanceParent, Function);
+  matches(testInstanceParent, TestInstanceParent);
+  fails(testInstanceChild, TestInstanceParent);
+
+  matches(testInstanceParent, Match.Optional(TestInstanceParent));
+  matches(testInstanceParent, Match.Maybe(TestInstanceParent));
+
+  // Circular Reference Objects
+
+  var circleFoo = {};
+  var circleBar = {};
+  circleFoo.bar = circleBar;
+  circleBar.foo = circleFoo;
+  fails(circleFoo, null);
 
   // Test that "arguments" is treated like an array.
   var argumentsMatches = function () {
@@ -328,6 +387,9 @@ Tinytest.add("check - Match error message", function (test) {
   match(null, Boolean, "Expected boolean, got null");
   match("string", undefined, "Expected undefined, got string");
   match(true, null, "Expected null, got true");
+  match({}, Match.ObjectIncluding({ bar: String }), "Missing key 'bar'");
+  match(null, Object, "Expected object, got null");
+  match(null, Function, "Expected function, got null");
   match("bar", "foo", "Expected foo, got \"bar\"");
   match(3.14, Match.Integer, "Expected Integer, got 3.14");
   match(false, [Boolean], "Expected array, got false");
@@ -335,6 +397,23 @@ Tinytest.add("check - Match error message", function (test) {
   match(2, {key: 2}, "Expected object, got number");
   match(null, {key: 2}, "Expected object, got null");
   match(new Date, {key: 2}, "Expected plain object");
+
+  var TestInstanceChild = function () {};
+  var TestInstanceParent = function (child) {
+    child._parent = this;
+    this.child = child;
+  };
+
+  var testInstanceChild = new TestInstanceChild()
+  var testInstanceParent = new TestInstanceParent(testInstanceChild);
+  match(testInstanceChild, TestInstanceParent, "Expected " + (TestInstanceParent.name || "particular constructor"));
+
+  var circleFoo = {};
+  var circleBar = {};
+  circleFoo.bar = circleBar;
+  circleBar.foo = circleFoo;
+  match(circleFoo, null, "Expected null, got object");
+
 });
 
 // Regression test for https://github.com/meteor/meteor/issues/2136

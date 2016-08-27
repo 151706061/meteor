@@ -7,6 +7,7 @@ var child_process = require('child_process');
 
 var _ = require('underscore');
 var isopackets = require('../tool-env/isopackets.js');
+var Console = require('../console/console.js').Console;
 
 // Given a Mongo URL, open an interative Mongo shell on this terminal
 // on that database.
@@ -36,24 +37,34 @@ var runMongoShell = function (url) {
 };
 
 // Start mongod with a dummy replSet and wait for it to listen.
-var spawnMongod = function (mongodPath, port, dbPath, replSetName) {
-  var child_process = require('child_process');
+function spawnMongod(mongodPath, port, dbPath, replSetName) {
+  const child_process = require('child_process');
 
   mongodPath = files.convertToOSPath(mongodPath);
   dbPath = files.convertToOSPath(dbPath);
 
-  return child_process.spawn(mongodPath, [
-      // nb: cli-test.sh and findMongoPids make strong assumptions about the
-      // order of the arguments! Check them before changing any arguments.
-      '--bind_ip', '127.0.0.1',
-      '--smallfiles',
-      '--port', port,
-      '--dbpath', dbPath,
-      // Use an 8MB oplog rather than 256MB. Uses less space on disk and
-      // initializes faster. (Not recommended for production!)
-      '--oplogSize', '8',
-      '--replSet', replSetName
-  ], {
+  const args = [
+    // nb: cli-test.sh and findMongoPids make strong assumptions about the
+    // order of the arguments! Check them before changing any arguments.
+    '--bind_ip', '127.0.0.1',
+    '--port', port,
+    '--dbpath', dbPath,
+    // Use an 8MB oplog rather than 256MB. Uses less space on disk and
+    // initializes faster. (Not recommended for production!)
+    '--oplogSize', '8',
+    '--replSet', replSetName
+  ];
+
+  // Use mmapv1 on 32bit platforms, as our binary doesn't support WT
+  if (process.platform === "win32"
+      || (process.platform === "linux" && process.arch === "ia32")) {
+    args.push('--storageEngine', 'mmapv1', '--smallfiles');
+  } else {
+    // The WT journal seems to be at least 300MB, which is just too much
+    args.push('--nojournal');
+  }
+
+  return child_process.spawn(mongodPath, args, {
     // Apparently in some contexts, Mongo crashes if your locale isn't set up
     // right. I wasn't able to reproduce it, but many people on #4019
     // were. Let's default a couple environment variables to English UTF-8 if
@@ -65,18 +76,18 @@ var spawnMongod = function (mongodPath, port, dbPath, replSetName) {
       LC_ALL: 'en_US.UTF-8'
     }, process.env)
   });
-};
+}
 
 // Find all running Mongo processes that were started by this program
 // (even by other simultaneous runs of this program). If passed,
-// appDir and port act as filters on the list of running mongos.
+// dbDir and port act as filters on the list of running mongos.
 //
-// Yields. Returns an array of objects with keys pid, port, appDir.
+// Yields. Returns an array of objects with keys pid, port, dbDir.
 var findMongoPids;
 if (process.platform === 'win32') {
   // Windows doesn't have a ps equivalent that (reliably) includes the command
   // line, so approximate using the combined output of tasklist and netstat.
-  findMongoPids = function (app_dir, port) {
+  findMongoPids = function (dbDir_unused, port) {
     var promise = fiberHelpers.makeFulfillablePromise();
 
     child_process.exec('tasklist /fi "IMAGENAME eq mongod.exe"',
@@ -142,7 +153,7 @@ if (process.platform === 'win32') {
     return promise.await();
   };
 } else {
-  findMongoPids = function (appDir, port) {
+  findMongoPids = function (dbDir, port) {
     var promise = fiberHelpers.makeFulfillablePromise();
 
     // 'ps ax' should be standard across all MacOS and Linux.
@@ -196,18 +207,18 @@ if (process.platform === 'win32') {
           // Matches mongos we start. Note that this matches
           // 'fake-mongod' (our mongod stub for automated tests) as well
           // as 'mongod'.
-          var m = line.match(/^\s*(\d+).+mongod .+--port (\d+) --dbpath (.+)(?:\/|\\)\.meteor(?:\/|\\)local(?:\/|\\)db/);
+          var m = line.match(/^\s*(\d+).+mongod .+--port (\d+) --dbpath (.+(?:\/|\\)db)/);
           if (m && m.length === 4) {
             var foundPid =  parseInt(m[1], 10);
             var foundPort = parseInt(m[2], 10);
             var foundPath = m[3];
 
             if ( (! port || port === foundPort) &&
-                 (! appDir || appDir === foundPath)) {
+                 (! dbDir || dbDir === foundPath)) {
               ret.push({
                 pid: foundPid,
                 port: foundPort,
-                appDir: foundPath
+                dbDir: foundPath
               });
             }
           }
@@ -222,8 +233,8 @@ if (process.platform === 'win32') {
 
 // See if mongo is running already. Yields. Returns the port that
 // mongo is running on or null if mongo is not running.
-var findMongoPort = function (appDir) {
-  var pids = findMongoPids(appDir);
+var findMongoPort = function (dbDir) {
+  var pids = findMongoPids(dbDir);
 
   if (pids.length !== 1) {
     return null;
@@ -252,10 +263,10 @@ if (process.platform === 'win32') {
   // where we try to connect to a mongod that is not running, or a wrong
   // mongod if our current app is not running but there is a left-over file
   // lying around. This still can be better than always failing to connect.
-  findMongoPort = function (appDir) {
+  findMongoPort = function (dbPath) {
     var mongoPort = null;
 
-    var portFile = files.pathJoin(appDir, '.meteor/local/db/METEOR-PORT');
+    var portFile = files.pathJoin(dbPath, 'METEOR-PORT');
     if (files.exists(portFile)) {
       mongoPort = files.readFile(portFile, 'utf8').replace(/\s/g, '');
     }
@@ -372,9 +383,6 @@ var launchMongo = function (options) {
     noOplog = true;
   }
 
-  // add .gitignore if needed.
-  files.addToGitignore(files.pathJoin(options.appDir, '.meteor'), 'local');
-
   var subHandles = [];
   var stopped = false;
   var handle = {};
@@ -399,7 +407,11 @@ var launchMongo = function (options) {
   var yieldingMethod = function (object, methodName, ...args) {
     return Promise.race([
       stopPromise,
-      Promise.denodeify(object[methodName]).apply(object, args)
+      new Promise((resolve, reject) => {
+        object[methodName](...args, (err, res) => {
+          err ? reject(err) : resolve(res);
+        });
+      })
     ]).await();
   };
 
@@ -520,7 +532,7 @@ var launchMongo = function (options) {
     var stdoutOnData = fiberHelpers.bindEnvironment(function (data) {
       // note: don't use "else ifs" in this, because 'data' can have multiple
       // lines
-      if (/config from self or any seed \(EMPTYCONFIG\)/.test(data)) {
+      if (/\[initandlisten\] Did not find local replica set configuration document at startup/.test(data)) {
         replSetReadyToBeInitiated = true;
         maybeReadyToTalk();
       }
@@ -530,13 +542,26 @@ var launchMongo = function (options) {
         maybeReadyToTalk();
       }
 
-      if (/ \[rsMgr\] replSet (PRIMARY|SECONDARY)/.test(data)) {
+      if (/ \[rsSync\] transition to primary complete/.test(data)) {
         replSetReady = true;
         maybeReadyToTalk();
       }
 
       if (/Insufficient free space/.test(data)) {
         detectedErrors.freeSpace = true;
+      }
+
+      // Running against a old mmapv1 engine, probably from pre-mongo-3.2 Meteor
+      if (/created by the 'mmapv1' storage engine, so setting the active storage engine to 'mmapv1'/.test(data)) {
+        Console.warn();
+        Console.warn('Your development database is using mmapv1, '
+          + 'the old, pre-MongoDB 3.0 database engine. '
+          + 'You should consider upgrading to Wired Tiger, the new engine. '
+          + 'The easiest way to do so in development is to run '
+          + Console.command('meteor reset') + '. '
+          + "If you'd like to migrate your database, please consult "
+          + Console.url('https://docs.mongodb.org/v3.0/release-notes/3.0-upgrade/'))
+        Console.warn();
       }
 
       if (/Invalid or no user locale set/.test(data)) {
@@ -587,38 +612,26 @@ var launchMongo = function (options) {
         });
       }
 
-      var initiateResult = yieldingMethod(
-        db.admin(), 'command', {replSetInitiate: configuration});
+      try {
+        var initiateResult = yieldingMethod(
+          db.admin(), 'command', {replSetInitiate: configuration});
+      } catch (e) {
+        if (e.message !== 'already initialized') {
+          throw Error("rs.initiate error: " + e.message);
+        }
+      }
+
       if (stopped) {
         return;
       }
-      // why this isn't in the error is unclear.
-      if (initiateResult && initiateResult.documents
-          && initiateResult.documents[0]
-          && initiateResult.documents[0].errmsg) {
-        var err = initiateResult.documents[0].errmsg;
-        if (err !== "already initialized") {
-          throw Error("rs.initiate error: " +
-                      initiateResult.documents[0].errmsg);
-        }
-      }
+
       // XXX timeout eventually?
       while (!stopped) {
-        var status = yieldingMethod(db.admin(), 'command',
-                                    {replSetGetStatus: 1});
-        if (!(status && status.documents && status.documents[0])) {
-          throw status;
-        }
-        status = status.documents[0];
-        if (!status.ok) {
-          if (status.startupStatus === 6) {  // "SOON"
-            utils.sleepMs(20);
-            continue;
-          }
-          throw status.errmsg;
-        }
-        // See http://docs.mongodb.org/manual/reference/replica-states/
-        // for information about the various states.
+        var status = yieldingMethod(
+          db.admin(), 'command', {replSetGetStatus: 1});
+
+        // See https://docs.mongodb.com/manual/reference/replica-states/
+        // for information on various states
 
         // Are any of the members starting up or recovering?
         if (_.any(status.members, function (member) {
@@ -632,7 +645,6 @@ var launchMongo = function (options) {
 
         // Is the intended primary currently a secondary? (It passes through
         // that phase briefly.)
-
         if (status.members[0].stateStr === 'SECONDARY') {
           utils.sleepMs(20);
           continue;
@@ -666,21 +678,21 @@ var launchMongo = function (options) {
 
   try {
     if (options.multiple) {
-      var dbBasePath = files.pathJoin(options.appDir, '.meteor', 'local', 'dbs');
+      var dbBasePath = files.pathJoin(options.projectLocalDir, 'dbs');
       _.each(_.range(3), function (i) {
         // Did we get stopped (eg, by one of the processes exiting) by now? Then
         // don't start anything new.
         if (stopped) {
           return;
         }
-        var dbPath = files.pathJoin(options.appDir, '.meteor', 'local', 'dbs', ''+i);
+        var dbPath = files.pathJoin(options.projectLocalDir, 'dbs', ''+i);
         launchOneMongoAndWaitForReadyForInitiate(dbPath, options.port + i);
       });
       if (!stopped) {
         initiateReplSetAndWaitForReady();
       }
     } else {
-      var dbPath = files.pathJoin(options.appDir, '.meteor', 'local', 'db');
+      var dbPath = files.pathJoin(options.projectLocalDir, 'db');
       var portFile = !noOplog && files.pathJoin(dbPath, 'METEOR-PORT');
       launchOneMongoAndWaitForReadyForInitiate(dbPath, options.port, portFile);
       if (!stopped && !noOplog) {
@@ -708,10 +720,10 @@ var launchMongo = function (options) {
 // restarts too often, we give up on restarting it, diagnostics are
 // logged, and onFailure is called.
 //
-// options: appDir, port, onFailure, multiple
+// options: projectLocalDir, port, onFailure, multiple
 var MongoRunner = function (options) {
   var self = this;
-  self.appDir = options.appDir;
+  self.projectLocalDir = options.projectLocalDir;
   self.port = options.port;
   self.onFailure = options.onFailure;
   self.multiple = options.multiple;
@@ -790,7 +802,7 @@ _.extend(MRp, {
     }
 
     self.handle = launchMongo({
-      appDir: self.appDir,
+      projectLocalDir: self.projectLocalDir,
       port: self.port,
       multiple: self.multiple,
       allowKilling: allowKilling,
@@ -799,7 +811,6 @@ _.extend(MRp, {
         self.suppressExitMessage = false;
       },
     });
-
     // It has successfully started up, so if it exits after this point, that
     // actually is an interesting fact and we shouldn't suppress it.
     self.suppressExitMessage = false;

@@ -1,5 +1,6 @@
 Plugin.registerMinifier({
-  extensions: ["js"]
+  extensions: ["js"],
+  archMatching: "web"
 }, function () {
   var minifier = new UglifyJSMinifier();
   return minifier;
@@ -33,7 +34,12 @@ UglifyJSMinifier.prototype.processFilesForBundle = function (files, options) {
 
   var allJs = '';
   files.forEach(function (file) {
-    allJs += UglifyJSMinify(file.getContentsAsString(), minifyOptions).code;
+    // Don't reminify *.min.js.
+    if (/\.min\.js$/.test(file.getPathInBundle())) {
+      allJs += file.getContentsAsString();
+    } else {
+      allJs += UglifyJSMinify(file.getContentsAsString(), minifyOptions).code;
+    }
     allJs += '\n\n';
 
     Plugin.nudge();

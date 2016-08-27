@@ -1,7 +1,8 @@
+var assert = require('assert');
 var _ = require('underscore');
 
 var bundler = require('../isobuild/bundler.js');
-var Builder = require('../isobuild/builder.js');
+import Builder from '../isobuild/builder.js';
 var compiler = require('../isobuild/compiler.js');
 var isopackCacheModule = require('../isobuild/isopack-cache.js');
 
@@ -12,6 +13,8 @@ var watch = require('../fs/watch.js');
 var Console = require('../console/console.js').Console;
 var fiberHelpers = require('../utils/fiber-helpers.js');
 var packageMapModule = require('../packaging/package-map.js');
+var archinfo = require('../utils/archinfo.js');
+var Profile = require('./profile.js').Profile;
 
 // TL;DR: Isopacket is a set of isopacks. Isopackets are used only inside
 // meteor-tool.
@@ -46,7 +49,7 @@ var packageMapModule = require('../packaging/package-map.js');
 
 // All of the defined isopackets. Whenever they are being built, they will be
 // built in the order listed here.
-var ISOPACKETS = {
+export const ISOPACKETS = {
   'ddp': ['ddp-client'],
   'mongo': ['npm-mongo'],
   'ejson': ['ejson'],
@@ -75,7 +78,13 @@ var loadedIsopackets = {};
 // The main entry point: loads and returns an isopacket from cache or from
 // disk. Does not do a build step: ensureIsopacketsLoadable must be called
 // first!
-var load = function (isopacketName) {
+export function load(isopacketName) {
+  // Small but necessary hack: because archinfo.host() calls execFileSync,
+  // it yields the first time we call it, which is a problem for the
+  // fiberHelpers.noYieldsAllowed block below. Calling it here ensures the
+  // result is cached, so no yielding occurs later.
+  assert.strictEqual(archinfo.host().split(".", 1)[0], "os");
+
   return fiberHelpers.noYieldsAllowed(function () {
     if (_.has(loadedIsopackets, isopacketName)) {
       if (loadedIsopackets[isopacketName]) {
@@ -96,7 +105,7 @@ var load = function (isopacketName) {
 
     throw Error("Unknown isopacket: " + isopacketName);
   });
-};
+}
 
 var isopacketPath = function (isopacketName) {
   return files.pathJoin(config.getIsopacketRoot(), isopacketName);
@@ -105,7 +114,7 @@ var isopacketPath = function (isopacketName) {
 // ensureIsopacketsLoadable is called at startup and ensures that all isopackets
 // exist on disk as up-to-date loadable programs.
 var calledEnsure = false;
-var ensureIsopacketsLoadable = function () {
+export function ensureIsopacketsLoadable() {
   if (calledEnsure) {
     throw Error("can't ensureIsopacketsLoadable twice!");
   }
@@ -199,7 +208,7 @@ var ensureIsopacketsLoadable = function () {
     Console.printMessages(messages);
     throw new Error("isopacket build failed?");
   }
-};
+}
 
 // Returns a new all-local-packages catalog to be used for building isopackets.
 var newIsopacketBuildingCatalog = function () {
@@ -231,7 +240,7 @@ var newIsopacketBuildingCatalog = function () {
   return isopacketCatalog;
 };
 
-var makeIsopacketBuildContext = function () {
+export function makeIsopacketBuildContext() {
   var context = {};
   var catalog = newIsopacketBuildingCatalog();
   var versions = {};
@@ -254,7 +263,7 @@ var makeIsopacketBuildContext = function () {
     noLineNumbers: true
   });
   return context;
-};
+}
 
 // Loads a built isopacket from disk. Always loads (the cache is in 'load', not
 // this function). Does not run a build process; it must already be built.
@@ -268,6 +277,7 @@ var loadIsopacketFromDisk = function (isopacketName) {
     __meteor_bootstrap__: { startupHooks: [] },
     __meteor_runtime_config__: { meteorRelease: "ISOPACKET" }
   };
+  env.Profile = Profile;
 
   var ret;
   var messages = buildmessage.capture({
@@ -295,10 +305,5 @@ var loadIsopacketFromDisk = function (isopacketName) {
   return ret;
 };
 
-var isopackets = exports;
-_.extend(exports, {
-  load: load,
-  ensureIsopacketsLoadable: ensureIsopacketsLoadable,
-  ISOPACKETS: ISOPACKETS,
-  makeIsopacketBuildContext: makeIsopacketBuildContext
-});
+// Support `import isopackets from "../path/to/isopackets.js"`.
+export default exports;

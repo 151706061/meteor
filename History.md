@@ -1,25 +1,834 @@
 ## v.NEXT
 
+## v1.4.1.1
+
+* Update the version of our Node MongoDB driver to 2.2.7 to fix a bug in
+  reconnection logic, leading to some `update` and `remove` commands being
+  treated as `insert`s. [#7594](https://github.com/meteor/meteor/issue/7594)
+
+## v1.4.1
+
+* Node has been upgraded to 4.5.0.
+
+* `npm` has been upgraded to 3.10.6.
+
+* The `meteor publish-for-arch` command is no longer necessary when
+  publishing Meteor packages with binary npm dependencies. Instead, binary
+  dependencies will be rebuilt automatically on the installation side.
+  Meteor package authors are not responsible for failures due to compiler
+  toolchain misconfiguration, and any compilation problems with the
+  underlying npm packages should be taken up with the authors of those
+  packages. That said, if a Meteor package author really needs or wants to
+  continue using `meteor publish-for-arch`, she should publish her package
+  using an older release: e.g. `meteor --release 1.4 publish`.
+  [#7608](https://github.com/meteor/meteor/pull/7608)
+
+* The `.meteor-last-rebuild-version.json` files that determine if a binary
+  npm package needs to be rebuilt now include more information from the
+  `process` object, namely `process.{platform,arch,versions}` instead of
+  just `process.versions`. Note also that the comparison of versions now
+  ignores differences in patch versions, to avoid needless rebuilds.
+
+* The `npm-bcrypt` package now uses a pure-JavaScript implementation by
+  default, but will prefer the native `bcrypt` implementation if it is
+  installed in the application's `node_modules` directory. In other words,
+  run `meteor install --save bcrypt` in your application if you need or
+  want to use the native implementation of `bcrypt`.
+  [#7595](https://github.com/meteor/meteor/pull/7595)
+
+* After Meteor packages are downloaded from Atmosphere, they will now be
+  extracted using native `tar` or `7z.exe` on Windows, instead of the
+  https://www.npmjs.com/package/tar library, for a significant performance
+  improvement. [#7457](https://github.com/meteor/meteor/pull/7457)
+
+* The npm `tar` package has been upgraded to 2.2.1, though it is now only
+  used as a fallback after native `tar` and/or `7z.exe`.
+
+* The progress indicator now distinguishes between downloading,
+  extracting, and loading newly-installed Meteor packages, instead of
+  lumping all of that work into a "downloading" status message.
+
+* Background Meteor updates will no longer modify the `~/.meteor/meteor`
+  symbolic link (or `AppData\Local\.meteor\meteor.bat` on Windows).
+  Instead, developers must explicitly type `meteor update` to begin using
+  a new version of the `meteor` script.
+
+* Password Reset tokens now expire (after 3 days by default -- can be modified via `Accounts.config({ passwordResetTokenExpirationInDays: ...}`). [PR #7534](https://github.com/meteor/meteor/pull/7534)
+
+* The `google` package now uses the `email` scope as a mandatory field instead
+  of the `profile` scope. The `profile` scope is still added by default if the
+  `requestPermissions` option is not specified to maintain backward
+  compatibility, but it is now possible to pass an empty array to
+  `requestPermissions` in order to only request the `email` scope, which
+  reduces the amount of permissions requested from the user in the Google
+  popup. [PR #6975](https://github.com/meteor/meteor/pull/6975)
+
+* Added `Facebook.handleAuthFromAccessToken` in the case where you get the FB
+  accessToken in some out-of-band way. [PR #7550](https://github.com/meteor/meteor/pull/7550)
+
+* `Accounts.onLogout` gets `{ user, connection }` context in a similar fashion
+  to `Accounts.onLogin`. [Issue #7397](https://github.com/meteor/meteor/issues/7397) [PR #7433](https://github.com/meteor/meteor/pull/7433)
+
+* The `node-gyp` and `node-pre-gyp` tools will now be installed in
+  `bundle/programs/server/node_modules`, to assist with rebuilding binary
+  npm packages when deploying an app to Galaxy or elsewhere.
+  [#7571](https://github.com/meteor/meteor/pull/7571)
+
+* The `standard-minifier-{js,css}` packages no longer minify .js or .css
+  files on the server. [#7572](https://github.com/meteor/meteor/pull/7572)
+
+* Multi-line input to `meteor shell`, which was broken by changes to the
+  `repl` module in Node 4, works again.
+  [#7562](https://github.com/meteor/meteor/pull/7562)
+
+* The implementation of the command-line `meteor` tool now forbids
+  misbehaving polyfill libraries from overwriting `global.Promise`.
+  [#7569](https://github.com/meteor/meteor/pull/7569)
+
+* The `oauth-encryption` package no longer depends on the
+  `npm-node-aes-gcm` package (or any special npm packages), because the
+  Node 4 `crypto` library natively supports the `aes-128-gcm` algorithm.
+  [#7548](https://github.com/meteor/meteor/pull/7548)
+
+* The server-side component of the `meteor shell` command has been moved
+  into a Meteor package, so that it can be developed independently from
+  the Meteor release process, thanks to version unpinning.
+  [#7624](https://github.com/meteor/meteor/pull/7624)
+
+* The `meteor shell` command now works when running `meteor test`.
+
+* The `meteor debug` command no longer pauses at the first statement
+  in the Node process, yet still reliably stops at custom breakpoints
+  it encounters later.
+
+* The `meteor-babel` package has been upgraded to 0.12.0.
+
+* The `meteor-ecmascript-runtime` package has been upgraded to 0.2.9, to
+  support several additional [stage 4
+  proposals](https://github.com/meteor/ecmascript-runtime/pull/4).
+
+* A bug that prevented @-scoped npm packages from getting bundled for
+  deployed apps has been fixed.
+  [#7609](https://github.com/meteor/meteor/pull/7609).
+
+* The `meteor update` command now supports an `--all-packages` flag to
+  update all packages (including indirect dependencies) to their latest
+  compatible versions, similar to passing the names of all your packages
+  to the `meteor update` command.
+  [#7653](https://github.com/meteor/meteor/pull/7653)
+
+* Background release updates can now be disabled by invoking either
+  `meteor --no-release-check` or `METEOR_NO_RELEASE_CHECK=1 meteor`.
+  [#7445](https://github.com/meteor/meteor/pull/7445)
+
+## v1.4.0.1
+
+* Fix issue with the 1.4 tool springboarding to older releases (see [Issue #7491](https://github.com/meteor/meteor/issues/7491))
+
+* Fix issue with running in development on Linux 32bit [Issue #7511](https://github.com/meteor/meteor/issues/7511)
+
+## v1.4
+
+* Node has been upgraded to 4.4.7.
+
+* The `meteor-babel` npm package has been upgraded to 0.11.7.
+
+* The `reify` npm package has been upgraded to 0.3.6.
+
+* The `bcrypt` npm package has been upgraded to 0.8.7.
+
+* Nested `import` declarations are now enabled for package code as well as
+  application code. 699cf1f38e9b2a074169515d23983f74148c7223
+
+* Meteor has been upgraded to support Mongo 3.2 by default (the bundled version
+  used by `meteor run` has been upgraded). Internally it now uses the 2.2.4
+  version of the `mongodb` npm driver, and has been tested against at Mongo 3.2
+  server. [Issue #6957](https://github.com/meteor/meteor/issues/6957)
+
+  Mongo 3.2 defaults to the new WiredTiger storage engine. You can update your
+  database following the instructions here:
+  https://docs.mongodb.com/v3.0/release-notes/3.0-upgrade/.
+  In development, you can also just use `meteor reset` to remove your old
+  database, and Meteor will create a new WiredTiger database for you. The Mongo
+  driver will continue to work with the old MMAPv1 storage engine however.
+
+  The new version of the Mongo driver has been tested with MongoDB versions from
+  2.6 up. Mongo 2.4 has now reached end-of-life
+  (https://www.mongodb.com/support-policy), and is no longer supported.
+
+  If you are setting `MONGO_OPLOG_URL`, especially in production, ensure you are
+  passing in the `replicaSet` argument (see [#7450]
+    (https://github.com/meteor/meteor/issues/7450))
+
+* Custom Mongo options can now be specified using the
+  `Mongo.setConnectionOptions(options)` API.
+  [#7277](https://github.com/meteor/meteor/pull/7277)
+
+* On the server, cursor.count() now takes a single argument `applySkipLimit`
+  (see the corresponding [Mongo documentation]
+    (http://mongodb.github.io/node-mongodb-native/2.1/api/Cursor.html#count))
+
+* Fix for regression caused by #5837 which incorrectly rewrote
+  network-path references (e.g. `//domain.com/image.gif`) in CSS URLs.
+  [#7416](https://github.com/meteor/meteor/issues/7416)
+* Added Angular2 boilerplate example [#7364](https://github.com/meteor/meteor/pull/7363)
+
+## v1.3.5.1
+
+* This release fixed a small bug in 1.3.5 that prevented updating apps
+  whose `.meteor/release` files refer to releases no longer installed in
+  `~/.meteor/packages/meteor-tool`. [576468eae8d8dd7c1fe2fa381ac51dee5cb792cd](https://github.com/meteor/meteor/commit/576468eae8d8dd7c1fe2fa381ac51dee5cb792cd)
+
+## v1.3.5
+
+* Failed Meteor package downloads are now automatically resumed from the
+  point of failure, up to ten times, with a five-second delay between
+  attempts. [#7399](https://github.com/meteor/meteor/pull/7399)
+
+* If an app has no `package.json` file, all packages in `node_modules`
+  will be built into the production bundle. In other words, make sure you
+  have a `package.json` file if you want to benefit from `devDependencies`
+  pruning. [7b2193188fc9e297eefc841ce6035825164f0684](https://github.com/meteor/meteor/commit/7b2193188fc9e297eefc841ce6035825164f0684)
+
+* Binary npm dependencies of compiler plugins are now automatically
+  rebuilt when Node/V8 versions change.
+  [#7297](https://github.com/meteor/meteor/issues/7297)
+
+* Because `.meteor/local` is where purely local information should be
+  stored, the `.meteor/dev_bundle` link has been renamed to
+  `.meteor/local/dev_bundle`.
+
+* The `.meteor/local/dev_bundle` link now corresponds exactly to
+  `.meteor/release` even when an app is using an older version of
+  Meteor. d732c2e649794f350238d515153f7fb71969c526
+
+* When recompiling binary npm packages, the `npm rebuild` command now
+  receives the flags `--update-binary` and `--no-bin-links`, in addition
+  to respecting the `$METEOR_NPM_REBUILD_FLAGS` environment variable.
+  [#7401](https://github.com/meteor/meteor/issues/7401)
+
+* The last solution found by the package version constraint solver is now
+  stored in `.meteor/local/resolver-result-cache.json` so that it need not
+  be recomputed every time Meteor starts up.
+
+* If the `$GYP_MSVS_VERSION` environment variable is not explicitly
+  provided to `meteor {node,npm}`, the `node-gyp` tool will infer the
+  appropriate version (though it still defaults to "2015").
+
+## v1.3.4.4
+
+* Fixed [#7374](https://github.com/meteor/meteor/issues/7374).
+
+* The default loglevel for internal `npm` commands (e.g., those related to
+  `Npm.depends`) has been set to "error" instead of "warn". Note that this
+  change does not affect `meteor npm ...` commands, which can be easily
+  configured using `.npmrc` files or command-line flags.
+  [0689cae25a3e0da3615a402cdd0bec94ce8455c8](https://github.com/meteor/meteor/commit/0689cae25a3e0da3615a402cdd0bec94ce8455c8)
+
+## v1.3.4.3
+
+* Node has been upgraded to 0.10.46.
+
+* `npm` has been upgraded to 3.10.5.
+
+* The `node-gyp` npm package has been upgraded to 3.4.0.
+
+* The `node-pre-gyp` npm package has been upgraded to 0.6.29.
+
+* The `~/.meteor/meteor` symlink (or `AppData\Local\.meteor\meteor.bat` on
+  Windows) will now be updated properly after `meteor update` succeeds. This was
+  promised in [v1.3.4.2](https://github.com/meteor/meteor/blob/devel/History.md#v1342)
+  but [not fully delivered](https://github.com/meteor/meteor/pull/7369#issue-164569763).
+
+* The `.meteor/dev_bundle` symbolic link introduced in
+  [v1.3.4.2](https://github.com/meteor/meteor/blob/devel/History.md#v1342)
+  is now updated whenever `.meteor/release` is read.
+
+* The `.meteor/dev_bundle` symbolic link is now ignored by
+  `.meteor/.gitignore`.
+
+## v1.3.4.2
+
+* The `meteor node` and `meteor npm` commands now respect
+  `.meteor/release` when resolving which versions of `node` and `npm` to
+  invoke. Note that you must `meteor update` to 1.3.4.2 before this logic
+  will take effect, but it will work in all app directories after
+  updating, even those pinned to older versions.
+  [#7338](https://github.com/meteor/meteor/issues/7338)
+
+* The Meteor installer now has the ability to resume downloads, so
+  installing Meteor on a spotty internet connection should be more
+  reliable. [#7348](https://github.com/meteor/meteor/pull/7348)
+
+* When running `meteor test`, shared directories are symlinked (or
+  junction-linked on Windows) into the temporary test directory, not
+  copied, leading to much faster test start times after the initial build.
+  The directories: `.meteor/local/{bundler-cache,isopacks,plugin-cache}`
+
+* `App.appendToConfig` allows adding custom tags to config.xml.
+  [#7307](https://github.com/meteor/meteor/pull/7307)
+
+* When using `ROOT_URL` with a path, relative CSS URLs are rewriten
+  accordingly. [#5837](https://github.com/meteor/meteor/issues/5837)
+
+* Fixed bugs:
+  [#7149](https://github.com/meteor/meteor/issues/7149)
+  [#7296](https://github.com/meteor/meteor/issues/7296)
+  [#7309](https://github.com/meteor/meteor/issues/7309)
+  [#7312](https://github.com/meteor/meteor/issues/7312)
+
+## v1.3.4.1
+
+* Increased the default HTTP timeout for requests made by the `meteor`
+  command-line tool to 60 seconds (previously 30), and [disabled the
+  timeout completely for Galaxy
+  deploys](https://forums.meteor.com/t/1-3-4-breaks-galaxy-deployment-etimedout/25383/).
+
+* Minor bug fixes: [#7281](https://github.com/meteor/meteor/pull/7281)
+  [#7276](https://github.com/meteor/meteor/pull/7276)
+
+## v1.3.4
+
+* The version of `npm` used by `meteor npm` and when installing
+  `Npm.depends` dependencies of Meteor packages has been upgraded from
+  2.15.1 to **3.9.6**, which should lead to much flatter node_modules
+  dependency trees.
+
+* The `meteor-babel` npm package has been upgraded to 0.11.6, and is now
+  installed using `npm@3.9.6`, fixing bugs arising from Windows path
+  limits, such as [#7247](https://github.com/meteor/meteor/issues/7247).
+
+* The `reify` npm package has been upgraded to 0.3.4, fixing
+  [#7250](https://github.com/meteor/meteor/issues/7250).
+
+* Thanks to caching improvements for the
+  `files.{stat,lstat,readdir,realpath}` methods and
+  `PackageSource#_findSources`, development server restart times are no
+  longer proportional to the number of files in `node_modules`
+  directories. [#7253](https://github.com/meteor/meteor/issues/7253)
+  [#7008](https://github.com/meteor/meteor/issues/7008)
+
+* When installed via `InstallMeteor.exe` on Windows, Meteor can now be
+  easily uninstalled through the "Programs and Features" control panel.
+
+* HTTP requests made by the `meteor` command-line tool now have a timeout
+  of 30 seconds, which can be adjusted by the `$TIMEOUT_SCALE_FACTOR`
+  environment variable. [#7143](https://github.com/meteor/meteor/pull/7143)
+
+* The `request` npm dependency of the `http` package has been upgraded
+  from 2.53.0 to 2.72.0.
+
+* The `--headless` option is now supported by `meteor test` and
+  `meteor test-packages`, in addition to `meteor self-test`.
+  [#7245](https://github.com/meteor/meteor/pull/7245)
+
+* Miscellaneous fixed bugs:
+  [#7255](https://github.com/meteor/meteor/pull/7255)
+  [#7239](https://github.com/meteor/meteor/pull/7239)
+
+## v1.3.3.1
+
+* Fixed bugs:
+  [#7226](https://github.com/meteor/meteor/pull/7226)
+  [#7181](https://github.com/meteor/meteor/pull/7181)
+  [#7221](https://github.com/meteor/meteor/pull/7221)
+  [#7215](https://github.com/meteor/meteor/pull/7215)
+  [#7217](https://github.com/meteor/meteor/pull/7217)
+
+* The `node-aes-gcm` npm package used by `oauth-encryption` has been
+  upgraded to 0.1.5. [#7217](https://github.com/meteor/meteor/issues/7217)
+
+* The `reify` module compiler has been upgraded to 0.3.3.
+
+* The `meteor-babel` package has been upgraded to 0.11.4.
+
+* The `pathwatcher` npm package has been upgraded to 6.7.0.
+
+* In CoffeeScript files with raw JavaScript enclosed by backticks, the
+  compiled JS will no longer contain `require` calls inserted by Babel.
+  [#7226](https://github.com/meteor/meteor/issues/7226)
+
+* Code related to the Velocity testing system has been removed.
+  [#7235](https://github.com/meteor/meteor/pull/7235)
+
+* Allow smtps:// in MAIL_URL [#7043](https://github.com/meteor/meteor/pull/7043)
+
+* Adds `Accounts.onLogout()` a hook directly analogous to `Accounts.onLogin()`. [PR #6889](https://github.com/meteor/meteor/pull/6889)
+
+## v1.3.3
+
+* Node has been upgraded from 0.10.43 to 0.10.45.
+
+* `npm` has been upgraded from 2.14.22 to 2.15.1.
+
+* The `fibers` package has been upgraded to 1.0.13.
+
+* The `meteor-babel` package has been upgraded to 0.10.9.
+
+* The `meteor-promise` package has been upgraded to 0.7.1, a breaking
+  change for code that uses `Promise.denodeify`, `Promise.nodeify`,
+  `Function.prototype.async`, or `Function.prototype.asyncApply`, since
+  those APIs have been removed.
+
+* Meteor packages with binary npm dependencies are now automatically
+  rebuilt using `npm rebuild` whenever the version of Node or V8 changes,
+  making it much simpler to use Meteor with different versions of Node.
+  5dc51d39ecc9e8e342884f3b4f8a489f734b4352
+
+* `*.min.js` files are no longer minified during the build process.
+  [PR #6986](https://github.com/meteor/meteor/pull/6986) [Issue #5363](https://github.com/meteor/meteor/issues/5363)
+
+* You can now pick where the `.meteor/local` directory is created by setting the `METEOR_LOCAL_DIR` environment variable. This lets you run multiple instances of the same Meteor app.
+  [PR #6760](https://github.com/meteor/meteor/pull/6760) [Issue #6532](https://github.com/meteor/meteor/issues/6532)
+
+* Allow using authType in Facebook login [PR #5694](https://github.com/meteor/meteor/pull/5694)
+
+* Adds flush() method to Tracker to force recomputation [PR #4710](https://github.com/meteor/meteor/pull/4710)
+
+* Adds `defineMutationMethods` option (default: true) to `new Mongo.Collection` to override default behavior that sets up mutation methods (/collection/[insert|update...]) [PR #5778](https://github.com/meteor/meteor/pull/5778)
+
+* Allow overridding the default warehouse url by specifying `METEOR_WAREHOUSE_URLBASE` [PR #7054](https://github.com/meteor/meteor/pull/7054)
+
+* Allow `_id` in `$setOnInsert` in Minimongo: https://github.com/meteor/meteor/pull/7066
+
+* Added support for `$eq` to Minimongo: https://github.com/meteor/meteor/pull/4235
+
+* Insert a `Date` header into emails by default: https://github.com/meteor/meteor/pull/6916/files
+
+* `meteor test` now supports setting the bind address using `--port IP:PORT` the same as `meteor run` [PR #6964](https://github.com/meteor/meteor/pull/6964) [Issue #6961](https://github.com/meteor/meteor/issues/6961)
+* Accounts.forgotPassword and .verifyEmail no longer throw errors if callback is provided. [Issue #5664](https://github.com/meteor/meteor/issues/5664) [Origin PR #5681](https://github.com/meteor/meteor/pull/5681) [Merged PR](https://github.com/meteor/meteor/pull/7117)
+
+* `Meteor.apply` now takes a `noRetry` option to opt-out of automatically retrying non-idempotent methods on connection blips: [PR #6180](https://github.com/meteor/meteor/pull/6180)
+
+* DDP callbacks are now batched on the client side. This means that after a DDP message arrives, the local DDP client will batch changes for a minimum of 5ms (configurable via `bufferedWritesInterval`) and a maximum of 500ms (configurable via `bufferedWritesMaxAge`) before calling any callbacks (such as cursor observe callbacks).
+
+* PhantomJS is no longer included in the Meteor dev bundle (#6905). If you
+  previously relied on PhantomJS for local testing, the `spiderable`
+  package, Velocity tests, or testing Meteor from a checkout, you should
+  now install PhantomJS yourself, by running the following commmand:
+  `meteor npm install -g phantomjs-prebuilt`
+
+* The `babel-compiler` package now looks for `.babelrc` files and
+  `package.json` files with a "babel" section. If found, these files may
+  contribute additional Babel transforms that run before the usual
+  `babel-preset-meteor` set of transforms. In other words, if you don't
+  like the way `babel-preset-meteor` handles a particular kind of syntax,
+  you can add your preferred transform plugins to the "presets" or
+  "plugins" section of your `.babelrc` or `package.json` file. #6351
+
+* When `BabelCompiler` cannot resolve a Babel plugin or preset package in
+  `.babelrc` or `package.json`, it now merely warns instead of
+  crashing. #7179
+
+* Compiler plugins can now import npm packages that are visible to their
+  input files using `inputFile.require(id)`. b16e8d50194b37d3511889b316345f31d689b020
+
+* `import` statements in application modules now declare normal variables
+  for the symbols that are imported, making it significantly easier to
+  inspect imported variables when debugging in the browser console or in
+  `meteor shell`.
+
+* `import` statements in application modules are no longer restricted to
+  the top level, and may now appear inside conditional statements
+  (e.g. `if (Meteor.isServer) { import ... }`) or in nested scopes.
+
+* `import` statements now work as expected in `meteor shell`. #6271
+
+* Commands installed in `dev_bundle/lib/node_modules/.bin` (such as
+  `node-gyp` and `node-pre-gyp`) are now available to scripts run by
+  `meteor npm`. e95dfe410e1b43e8131bc2df9d2c29decdd1eaf6
+
+* When building an application using `meteor build`, "devDependencies"
+  listed in `package.json` are no longer copied into the bundle. #6750
+
+* Packages tested with `meteor test-packages` now have access to local
+  `node_modules` directories installed in the parent application or in the
+  package directory itself. #6827
+
+* You no longer need to specify `DEPLOY_HOSTNAME=galaxy.meteor.com` to run
+  `meteor deploy` (and similar commands) against Galaxy. The AWS us-east-1
+  Galaxy is now the default for `DEPLOY_HOSTNAME`. If your app's DNS points to
+  another Galaxy region, `meteor deploy` will detect that automatically as
+  well. #7055
+
+* The `coffeescript` plugin now passes raw JavaScript code enclosed by
+  back-ticks to `BabelCompiler`, enabling all ECMAScript features
+  (including `import` and `export`) within CoffeeScript. #6000 #6691
+
+* The `coffeescript` package now implies the same runtime environment as
+  `ecmascript` (`ecmascript-runtime`, `babel-runtime`, and `promise`, but
+  not `modules`). #7184
+
+* When Meteor packages install `npm` dependencies, the
+  `process.env.NPM_CONFIG_REGISTRY` environment variable is now
+  respected. #7162
+
+* `files.rename` now always executes synchronously. 9856d1d418a4d19c0adf22ec9a92f7ce81a23b05
+
+* "Bare" files contained by `client/compatibility/` directories or added
+  with `api.addFiles(path, ..., { bare: true })` are no longer compiled by
+  Babel. https://github.com/meteor/meteor/pull/7033#issuecomment-225126778
+
+* Miscellaneous fixed bugs: #6877 #6843 #6881
+
+## v1.3.2.4
+
+> Meteor 1.3.2.4 was published because publishing 1.3.2.3 failed in an
+unrecoverable way. Meteor 1.3.2.4 contains no additional changes beyond
+the changes in 1.3.2.3.
+
+## v1.3.2.3
+
+* Reverted accidental changes included in 1.3.2.1 and 1.3.2.2 that
+  improved DDP performance by batching updates, but broke some packages
+  that relied on private methods of the DDP client Connection class. See
+  https://github.com/meteor/meteor/pull/5680 for more details. These
+  changes will be reinstated in 1.3.3.
+
+## v1.3.2.2
+
+* Fixed bugs #6819 and #6831.
+
+## v1.3.2.1
+
+* Fixed faulty comparison of `.sourcePath` and `.targetPath` properties of
+  files scanned by the `ImportScanner`, which caused problems for apps
+  using the `tap:i18n` package. 6e792a7cf25847b8cd5d5664a0ff45c9fffd9e57
+
+## v1.3.2
+
+* The `meteor/meteor` repository now includes a `Roadmap.md` file:
+  https://github.com/meteor/meteor/blob/devel/Roadmap.md
+
+* Running `npm install` in `bundle/programs/server` when deploying an app
+  also rebuilds any binary npm dependencies, fixing #6537. Set
+  METEOR_SKIP_NPM_REBUILD=1 to disable this behavior if necessary.
+
+* Non-.js(on) files in `node_modules` (such as `.less` and `.scss`) are
+  now processed by compiler plugins and may be imported by JS. #6037
+
+* The `jquery` package can now be completely removed from any app (#6563),
+  and uses `<app>/node_modules/jquery` if available (#6626).
+
+* Source maps are once again generated for all bundled JS files, even if
+  they are merely identity mappings, so that the files appear distinct in
+  the browser, and stack traces make more sense. #6639
+
+* All application files in `imports` directories are now considered lazy,
+  regardless of whether the app is using the `modules` package. This could
+  be a breaking change for 1.3.2 apps that do not use `modules` or
+  `ecmascript` but contain `imports` directories. Workaround: move files
+  out of `imports`, or rename `imports` to something else.
+
+* The `npm-bcrypt` package has been upgraded to use the latest version
+  (0.8.5) of the `bcrypt` npm package.
+
+* Compiler plugins can call `addJavaScript({ path })` multiple times with
+  different paths for the same source file, and `module.id` will reflect
+  this `path` instead of the source path, if they are different. #6806
+
+* Fixed bugs: https://github.com/meteor/meteor/milestones/Release%201.3.2
+
+* Fixed unintended change to `Match.Optional` which caused it to behave the same as the new `Match.Maybe` and incorrectly matching `null` where it previously would not have allowed it. #6735
+
+## v1.3.1
+
+* Long isopacket node_modules paths have been shortened, fixing upgrade
+  problems on Windows. #6609
+
+* Version 1.3.1 of Meteor can now publish packages for earlier versions of
+  Meteor, provided those packages do not rely on modules. #6484 #6618
+
+* The meteor-babel npm package used by babel-compiler has been upgraded to
+  version 0.8.4. c8d12aed4e725217efbe86fa35de5d5e56d73c83
+
+* The `meteor node` and `meteor npm` commands now return the same exit
+  codes as their child processes. #6673 #6675
+
+* Missing module warnings are no longer printed for Meteor packages, or
+  for `require` calls when `require` is not a free variable, fixing
+  https://github.com/practicalmeteor/meteor-mocha/issues/19.
+
+* Cordova iOS builds are no longer built by Meteor, but merely prepared
+  for building. 88d43a0f16a484a5716050cb7de8066b126c7b28
+
+* Compiler plugin errors were formerly silenced for files not explicitly
+  added in package.js. Now those errors are reported when/if the files are
+  imported by the ImportScanner. be986fd70926c9dd8eff6d8866205f236c8562c4
+
+## v1.3
+
+### ES2015/Modules
+
+* Enable ES2015 and CommonJS modules in Meteor apps and packages, on
+  both client and server. Also let you install modules in apps and
+  package by running `npm install`. See: https://github.com/meteor/meteor/blob/master/packages/modules/README.md
+
+* Enable ES2015 generators and ES2016 async/await in the `ecmascript`
+  package.
+
+* Inherit static getters and setters in subclasses, when using the
+  `ecmascript` package. #5624
+
+* Report full file paths on compiler errors when using the
+  `ecmascript` package. #5551
+
+* Now possible to `import` or `require` files with a `.json` file
+  extension. #5810
+
+* `process.env.NODE_ENV` is now defined on both client and server as
+  either `development` or `production`, which also determines the boolean
+  flags `Meteor.isDevelopment` and `Meteor.isProduction`.
+
+* Absolute identifiers for app modules no longer have the `/app/` prefix,
+  and absolute identifiers for Meteor packages now have the prefix
+  `/node_modules/meteor/` instead of just `/node_modules/`, meaning you
+  should `import {Blaze} from "meteor/blaze"` instead of `from "blaze"`.
+
+* Package variables imported by application code are once again exposed
+  globally, allowing them to be accessed from the browser console or from
+  `meteor shell`. #5868
+
+* Fixed global variable assignment analysis during linking. #5870 #5819
+
+* Changes to files in node_modules will now trigger a restart of the
+  development server, just like any other file changes. #5815
+
+* The meteor package now exports a `global` variable (a la Node) that
+  provides a reliable reference to the global object for all Meteor code.
+
+* Packages in local node_modules directories now take precedence over
+  Meteor packages of the same name. #5933
+
+* Upgraded `babel-compiler` to Babel 6, with the following set of plugins:
+  https://github.com/meteor/babel-preset-meteor/blob/master/index.js
+
+* Lazy CSS modules may now be imported by JS: 12c946ee651a93725f243f790c7919de3d445a19
+
+* Packages in the top-level node_modules directory of an app can now be
+  imported by Meteor packages: c631d3ac35f5ca418b93c454f521989855b8ec72
+
+* Added support for wildcard import and export statements. #5872 #5897
+
+* Client-side stubs for built-in Node modules are now provided
+  automatically if the `meteor-node-stubs` npm package is installed. #6056
+
+* Imported file extensions are now optional for file types handled by
+  compiler plugins. #6151
+
+* Upgraded Babel packages to ~6.5.0: 292824da3f8449afd1cd39fcd71acd415c809c0f
+  Note: .babelrc files are now ignored (#6016), but may be reenabled (#6351).
+
+* Polyfills now provided for `process.nextTick` and `process.platform`. #6167 #6198 #6055 efe53de492da6df785f1cbef2799d1d2b492a939
+
+* The `meteor test-app` command is now `meteor test [--full-app]`:
+  ab5ab15768136d55c76d51072e746d80b45ec181
+
+* New apps now include a `package.json` file.
+  c51b8cf7ffd8e7c9ca93768a2df93e4b552c199c
+
+* `require.resolve` is now supported.
+  https://github.com/benjamn/install/commit/ff6b25d6b5511d8a92930da41db73b93eb1d6cf8
+
+* JSX now enabled in `.js` files processed by the `ecmascript` compiler
+  plugin. #6151
+
+* On the server, modules contained within `node_modules` directories are
+  now loaded using the native Node `require` function. #6398
+
+* All `<script>` tag(s) for application and package code now appear at the
+  end of the `<body>` rather than in the `<head>`. #6375
+
+* The client-side version of `process.env.NODE_ENV` (and other environment
+  variables) now matches the corresponding server-side values. #6399
+
+### Performance
+
 * Don't reload package catalog from disk on rebuilds unless package
-  depedencies changed. #5747
+  dependencies changed. #5747
 
 * Improve minimongo performance on updating documents when there are
   many active observes. #5627
+
+### Platform
+
+* Upgrade to Node v0.10.41.
+
+* Allow all types of URLs that npm supports in `Npm.depends`
+  declarations.
+
+* Split up `standard-minifiers` in separate CSS
+  (`standard-minifiers-css`) and JS minifiers
+  (`standard-minifiers-js`). `standard-minifiers` now acts as an
+  umbrella package for these 2 minifiers.
+
+* Allow piping commands to `meteor shell` via STDIN. #5575
+
+* Let users set the CAFILE environment variable to override the SSL
+  root certificate list. #4757 #5523
+
+* `force-ssl` is now marked production only.
+
+### Cordova
+
+* Cordova dependencies have been upgraded to the latest versions
+  (`cordova-lib` 6.0.0, `cordova-ios` 4.0.1, and `cordova-android` 5.1.0).
+
+* iOS apps now require iOS 8 or higher, and building for iOS requires Xcode 7.2
+  to be installed.
+
+* Building for Android now requires Android SDK 23 to be installed. You may also
+  need to create a new AVD for the emulator.
+
+* Building Cordova Android apps on Windows is now supported. #4155
+
+* The Crosswalk plugin has been updated to 1.4.0.
+
+* Cordova core plugins are now pinned to minimal versions known to be compatible
+  with the included platforms. A warning is printed asking people to upgrade
+  their dependencies if they specify an older version, but we'll always use
+  the pinned version regardless.
+
+* The plugin used for file serving and hot code push has been completely
+  rewritten. Among many other improvements, it downloads updates incrementally,
+  can recover from downloading faulty JavaScript code, and is much more
+  reliable and performant.
+  See [`cordova-plugin-meteor-webapp`](https://github.com/meteor/cordova-plugin-meteor-webapp)
+  for more a more detailed description of the new design.
+
+* If the callbacks added with `Meteor.startup()` do not complete within a set
+  time, we consider a downloaded version faulty and will fallback to the last
+  known good version. The default timeout is 20 seconds, but this can be
+  configured by setting `App.setPreference("WebAppStartupTimeout", "10000");`
+  (in milliseconds) in `mobile-config.js`.
+
+* We now use `WKWebView` on iOS by default, even on iOS 8 (which works because
+  we do not use `file://` URLs).
+
+* We now use `localhost` instead of `meteor.local` to serve files from. Since
+  `localhost` is considered a secure origin, this means the web view won't
+  disable web platform features that it otherwise would.
+
+* The local server port now lies between 12000-13000 and is chosen based on
+  the `appId`, to both be consistent and lessen the chance of collisions between
+  multiple Meteor Cordova apps installed on the same device.
+
+* The plugin now allows for local file access on both iOS and Android, using a
+  special URL prefix (`http://localhost:<port>/local-filesystem/<path>`).
+
+* App icon and launch image sizes have been updated. Low resolution sizes for
+  now unsupported devices have been deprecated, and higher resolution versions
+  have been added.
+
+* We now support the modern Cordova whitelist mechanism. `App.accessRule` has
+  been updated with new options.
+
+* `meteor build` now supports a `--server-only` option to avoid building
+  the mobile apps when `ios` or `android` platforms have been added. It still
+  builds the `web.cordova` architecture in the server bundle however, so it can
+  be served for hot code pushes.
+
+* `meteor run` now always tries to use an autodetected IP address as the
+  mobile `ROOT_URL`, even if we're not running on a device. This avoids a situation
+  where an app already installed on a device connects to a restarted development
+  server and receives a `localhost` `ROOT_URL`. #5973
+
+* Fixed a discrepancy between the way we calculated client hashes during a mobile
+  build and on the server, which meant a Cordova app would always download a
+  new version the first time it started up.
+
+* In Cordova apps, `Meteor.startup()` now correctly waits for the
+  device to be ready before firing the callback.
+
+### Accounts
+
+* Make `Accounts.forgotPassword` treat emails as case insensitive, as
+  the rest of the accounts system does.
+
+### Blaze
+
+* Don't throw in certain cases when calling a template helper with an
+  empty data context. #5411 #5736
+
+* Improve automatic blocking of URLs in attribute values to also
+  include `vbscript:` URLs.
+
+### Check
+
+* Introduced new matcher `Match.Maybe(type)` which will also match (permit) `null` in addition to `undefined`.  This is a suggested replacement (where appropriate) for `Match.Optional` which did not permit `null`.  This prevents the need to use `Match.OneOf(null, undefined, type)`. #6220
+
+### Testing
+
+* Packages can now be marked as `testOnly` to only run as part of app
+  testing with `meteor test`. This is achieved by setting
+  `testOnly: true` to `Package.describe`.
+
+
+### Uncategorized
+
+* Remove warning in the `simple-todos-react` example app. #5716
+
+* Fix interaction between `browser-policy` and `oauth` packages. #5628
+
+* Add README.md to the `tinytest` package. #5750
+
+* Don't crash when calling `ReactiveDict.prototype.clear` if a
+  property with a value wasn't previously accessed. #5530 #5602
+
+* Move `DDPRateLimiter` to the server only, since it won't work if it
+  is called from the client. It will now error if referenced from the
+  client at all.
+
+* Don't call function more than once when passing a `Match.Where`
+  argument to `check`. #5630 #5651
+
+* Fix empty object argument check in `this.subscribe` in
+  templates. #5620
+
+* Make `HTTP.call` not crash on undefined content. #5565 #5601
+
+* Return observe handle from
+  `Mongo.Collection.prototype._publishCursor`. #4983 #5615
+
+* Add 'Did you mean?' reminders for some CLI commands to help Rails
+  developers. #5593
+
+* Make internal shell scripts compatible with other Unix-like
+  systems. #5585
+
+* Add a `_pollingInterval` option to `coll.find()` that can be used in
+  conjunction with `_disableOplog: true`. #5586
+
+* Expose Tinytest internals which can be used to extend it. #3541
+
+* Improve error message from `check` when passing in null. #5545
 
 * Split up `standard-minifiers` in separate CSS (`standard-minifier-css`) and JS
   minifiers(`standard-minifier-js`). `standard-minifiers` now acts as an umbrella package for these
   2 minifiers.
 
-* Move `DDPRateLimiter` to the server only, since it won't work if it is called from the client. It
-  will now error if referenced from the client at all.
+* Detect new Facebook user-agent in the `spiderable` package. #5516
 
 * `Match.ObjectIncluding` now really requires plain objects. #6140
 
 * Allow `git+` URL schemes for npm dependencies. #844
 
-* Expose options `disableOplog`, `pollingIntervalMs`, and `pollingThrottleMs` to `Cursor.find` for tuning observe parameters on the server.
+* Expose options `disableOplog`, `pollingIntervalMs`, and
+  `pollingThrottleMs` to `Cursor.find` for tuning observe parameters
+  on the server.
 
-Patches contributed by GitHub users vereed, devgrok, ...
+* Expose `dynamicHead` and `dynamicBody` hooks in boilerplate generation allowing code to inject content into the body and head tags from the server. #3860
+
+* Add methods of the form `BrowserPolicy.content.allow<ContentType>BlobUrl()` to BrowserPolicy #5141
+
+* Move `<script>` tags to end of `<body>` to enable 'loading' UI to be inserted into the boilerplate #6375
+
+* Adds WebAppInternals.setBundledJsCssUrlRewriteHook allowing apps to supply a hook function that can create a dynamic bundledJsCssPrefix at runtime. This is useful if you're using a CDN by giving you a way to ensure the CDN won't cache broken js/css resources during an app upgrade.
+
+Patches contributed by GitHub users vereed, mitar, nathan-muir,
+robfallows, skishore, okland, Primigenus, zimme, welelay, rgoomar,
+bySabi, mbrookes, TomFreudenberg, TechPlexEngineer, zacharydenton,
+AlexeyMK, gwendall, dandv, devgrok, brianlukoff.
 
 
 ## v.1.2.1, 2015-Oct-26
@@ -863,7 +1672,7 @@ romanzolotarev, Siilwyn, and tmeasday.
 
 * Add `meteor test-packages --velocity` (similar to `meteor run --test`).  [#3330](https://github.com/meteor/meteor/issues/3330)
 
-* Fix `meteor update <packageName>` to update <packageName> even if it's an
+* Fix `meteor update <packageName>` to update `<packageName>` even if it's an
   indirect dependency of your app.  [#3282](https://github.com/meteor/meteor/issues/3282)
 
 * Fix stack trace when a browser tries to use the server like a proxy.  [#1212](https://github.com/meteor/meteor/issues/1212)
@@ -3448,7 +4257,7 @@ milesmatthias, Primigenus, raix, timhaines, and xenolf.
 * Re-rendering a template with Spark no longer reverts changes made by
   users to a `preserve`d form element. Instead, the newly rendered value
   is only applied if it is different from the previously rendered value.
-  Additionally, <INPUT> elements with type other than TEXT can now have
+  Additionally, `<INPUT>` elements with type other than TEXT can now have
   reactive values (eg, the labels on submit buttons can now be
   reactive).  [#510](https://github.com/meteor/meteor/issues/510) [#514](https://github.com/meteor/meteor/issues/514) [#523](https://github.com/meteor/meteor/issues/523) [#537](https://github.com/meteor/meteor/issues/537) [#558](https://github.com/meteor/meteor/issues/558)
 
@@ -3481,7 +4290,7 @@ milesmatthias, Primigenus, raix, timhaines, and xenolf.
   slashes.
 
 * Spark improvements:
-  * Improve rendering of <SELECT> elements on IE.  [#496](https://github.com/meteor/meteor/issues/496)
+  * Improve rendering of `<SELECT>` elements on IE.  [#496](https://github.com/meteor/meteor/issues/496)
   * Don't lose nested data contexts in IE9/10 after two seconds.  [#458](https://github.com/meteor/meteor/issues/458)
   * Don't print a stack trace if DOM nodes are manually removed
     from the document without calling `Spark.finalize`.  [#392](https://github.com/meteor/meteor/issues/392)

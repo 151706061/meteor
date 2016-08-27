@@ -18,13 +18,7 @@ var httpHelpers = require('../utils/http-helpers.js');
 
 var main = exports;
 
-// On Node 0.10 on Windows, stdout and stderr don't get flushed when calling
-// `process.exit`. We use a workaround for now, but this should be fixed on
-// Node 0.12, so when we upgrade let's remember to remove this clause, and the
-// file it requires. See https://github.com/joyent/node/issues/3584
-if (process.platform === "win32") {
-  require('../tool-env/flush-buffers-on-exit-in-windows.js');
-}
+require('./flush-buffers-on-exit-in-windows.js');
 
 // node (v8) defaults to only recording 10 lines of stack trace. This
 // is especially insufficient when using fibers, because you get
@@ -45,6 +39,7 @@ function Command(options) {
   options = _.extend({
     minArgs: 0,
     options: {},
+    allowUnrecognizedOptions: false,
     requiresApp: false,
     requiresPackage: false,
     requiresAppOrPackage: false,
@@ -498,6 +493,14 @@ var springboard = function (rel, options) {
     }).await());
   }
 
+  // On OSX, there is a bug in node 4 when launching out to a node 0.10 process
+  // This should be fixed in the next release of node (we should then revert
+  // this change) https://github.com/meteor/meteor/issues/7491
+  if (process.platform === 'darwin') {
+    newArgv.unshift('-q', '/dev/null', executable);
+    executable = 'script';
+  }
+
   // Now exec; we're not coming back.
   require('kexec')(executable, newArgv);
   throw Error('exec failed?');
@@ -551,7 +554,7 @@ Fiber(function () {
   // Set up git hooks, but not on Windows because they don't work there and it;s
   // not worth setting it up at the moment
   if (files.inCheckout() && process.platform !== "win32") {
-    var installGitHooks = require('../tool-env/install-git-hooks.js');
+    var installGitHooks = require('../tool-env/install-git-hooks.js')['default'];
     installGitHooks();
   }
 
@@ -1265,7 +1268,7 @@ Fiber(function () {
   });
 
   // Check for unrecognized options.
-  if (_.keys(rawOptions).length > 0) {
+  if (_.keys(rawOptions).length > 0 && !command.allowUnrecognizedOptions) {
     Console.error(
       Console.command(_.keys(rawOptions)[0]) + ": unknown option.");
     Console.rawError(
@@ -1404,7 +1407,7 @@ Fiber(function () {
       });
     }
 
-    var ret = command.func(options);
+    var ret = command.func(options, {rawOptions});
   } catch (e) {
     Console.enableProgressDisplay(false);
 

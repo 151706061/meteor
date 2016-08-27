@@ -1,5 +1,8 @@
 # Meteor
 
+[![TravisCI Status](https://travis-ci.org/meteor/meteor.svg?branch=devel)](https://travis-ci.org/meteor/meteor)
+[![CircleCI Status](https://circleci.com/gh/meteor/meteor/tree/devel.svg?style=shield&circle-token=c2d3c041506bd493ef3795ffa4448684cfce97b8)](https://circleci.com/gh/meteor/meteor/tree/devel)
+
 Meteor is an ultra-simple environment for building modern web
 applications.
 
@@ -9,16 +12,18 @@ With Meteor you write apps:
 * that send data over the wire, rather than HTML
 * using your choice of popular open-source libraries
 
-Documentation is available at http://docs.meteor.com/.
-
 Try the getting started [tutorial](https://www.meteor.com/try).
+
+Next, read the [guide](http://guide.meteor.com) or the reference documentation at http://docs.meteor.com/.
 
 ## Quick Start
 
-Install Meteor:
+On Windows, simply go to https://www.meteor.com/install and use the Windows installer.
+
+On Linux/macOS, use this line:
 
 ```bash
-curl https://install.meteor.com | /bin/sh
+curl https://install.meteor.com/ | sh
 ```
 
 Create a project:
@@ -32,12 +37,6 @@ Run it:
 ```bash
 cd try-meteor
 meteor
-```
-
-Deploy it to the world, for free:
-
-```bash
-meteor deploy try-meteor.meteor.com
 ```
 
 ## Slow Start (for developers)
@@ -93,6 +92,8 @@ home directory. To uninstall Meteor, run:
 rm -rf ~/.meteor/
 sudo rm /usr/local/bin/meteor
 ```
+
+On Windows, just run the uninstaller from your Control Panel.
 
 ## Developer Resources
 

@@ -61,8 +61,6 @@ var checkForUpdate = function (showBanner, printErrors) {
     return;
   }
 
-  updateMeteorToolSymlink(printErrors);
-
   maybeShowBanners();
 };
 
@@ -152,7 +150,7 @@ var maybeShowBanners = function () {
 
 // Update ~/.meteor/meteor to point to the tool binary from the tools of the
 // latest recommended release on the default release track.
-var updateMeteorToolSymlink = function (printErrors) {
+export function updateMeteorToolSymlink(printErrors) {
   // Get the latest release version of METEOR. (*Always* of the default
   // track, not of whatever we happen to be running: we always want the tool
   // symlink to go to the default track.)
@@ -215,4 +213,4 @@ var updateMeteorToolSymlink = function (printErrors) {
     tropohouse.default.linkToLatestMeteor(files.pathJoin(
       relativeToolPath, toolRecord.path, 'meteor'));
   }
-};
+}

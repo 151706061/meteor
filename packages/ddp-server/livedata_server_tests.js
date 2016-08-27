@@ -157,10 +157,61 @@ Tinytest.addAsync(
   }
 );
 
+let onSubscriptions = {};
+
+Meteor.publish({
+  publicationObject () {
+    let callback = onSubscriptions;
+    if (callback)
+      callback();
+    this.stop();
+  }
+});
+
+Meteor.publish({
+  "publication_object": function () {
+    let callback = onSubscriptions;
+    if (callback)
+      callback();
+    this.stop();
+  }
+});
+
+Meteor.publish("publication_compatibility", function () {
+  let callback = onSubscriptions;
+  if (callback)
+    callback();
+  this.stop();
+});
+
+Tinytest.addAsync(
+  "livedata server - publish object",
+  function (test, onComplete) {
+    makeTestConnection(
+      test,
+      function (clientConn, serverConn) {
+        let testsLength = 0;
+
+        onSubscriptions = function (subscription) {
+          delete onSubscriptions;
+          clientConn.disconnect();
+          testsLength++;
+          if(testsLength == 3){
+            onComplete();
+          }
+        };
+        clientConn.subscribe("publicationObject");
+        clientConn.subscribe("publication_object");
+        clientConn.subscribe("publication_compatibility");
+      }
+    );
+  }
+);
+
 Meteor.methods({
   testResolvedPromise(arg) {
     const invocation1 = DDP._CurrentInvocation.get();
-    return new Promise.resolve(arg).then(result => {
+    return Promise.resolve(arg).then(result => {
       const invocation2 = DDP._CurrentInvocation.get();
       // This equality holds because Promise callbacks are bound to the
       // dynamic environment where .then was called.
@@ -172,7 +223,7 @@ Meteor.methods({
   },
 
   testRejectedPromise(arg) {
-    return new Promise.resolve(arg).then(result => {
+    return Promise.resolve(arg).then(result => {
       throw new Meteor.Error(result + " raised Meteor.Error");
     });
   }
